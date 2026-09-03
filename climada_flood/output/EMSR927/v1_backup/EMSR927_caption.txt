@@ -1,0 +1,13 @@
+Nepal, Rasuwa district: a glacial lake outburst flood, 26 August. Copernicus EMS graded 3,207 buildings from 50cm imagery. 2,521 destroyed. 79%.
+
+A dam and two power stations gone. 47km of road cut.
+
+Copernicus publishes what was damaged. Not what it cost. That's the gap this model fills: 36 to 39 million euros modelled loss, priced from the graded damage itself, not an assumed water depth.
+
+Full breakdown by site in the carousel. Method and code linked below.
+
+github.com/ihammouti/hazard-watch
+
+Modelled estimate. Not a loss adjustment, official assessment, or insurance advice.
+
+#Nepal #FloodRisk #Reinsurance #CatModeling #CopernicusEMS #ClimateRisk

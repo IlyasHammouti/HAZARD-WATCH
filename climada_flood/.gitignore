@@ -1,0 +1,28 @@
+# Données volumineuses : régénérables via les notebooks ou téléchargeables
+# depuis les sources officielles (voir README). Exclues pour garder le dépôt léger.
+data/
+
+# Sorties de calcul
+*.tif
+*.tiff
+*.hdf5
+*.h5
+*.nc
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# Secrets et identifiants — ne jamais versionner
+.env
+*.key
+credentials.json
+service_account*.json
+
+# Système
+.DS_Store
+Thumbs.db
+desktop.ini
