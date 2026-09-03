@@ -1,0 +1,71 @@
+HAZARD WATCH, LINKEDIN PAGE COPY
+Plain text, ready to paste. No markdown, because LinkedIn renders none.
+
+
+NAME
+
+Hazard Watch
+
+
+TAGLINE (120 characters maximum, 68 used)
+
+Satellite-observed footprints, modelled loss estimates, open method.
+
+
+ABOUT (2000 characters maximum)
+
+Hazard Watch publishes quantified damage estimates for natural catastrophes, from satellite observation to a figure in currency, with every assumption written down.
+
+A catastrophe model rests on one identity:
+
+Hazard × Exposure × Vulnerability = Loss
+
+Public services usually stop at the physical footprint. Financial estimates come from private providers behind closed methods. This page works in the space between the two.
+
+What a bulletin carries:
+
+- Hazard. Flood footprint from a before and after comparison of Sentinel-1 radar imagery, which sees through the cloud cover present during an event.
+- Exposure. Built-up value from open datasets, GHSL and LitPop.
+- Vulnerability. Depth-damage functions published by the Joint Research Centre of the European Commission.
+- Loss. The three combined through CLIMADA, the open framework from ETH Zurich.
+
+Every post carrying a number states its output tier. Tier 1 is a modelled loss in currency. Tier 2 is exposed value and affected population. Tier 3 is physical extent only. A reader knows what a figure is worth before reading it.
+
+When official or industry figures are published for an event, the estimate is compared against them here, in whichever direction the gap goes.
+
+All figures here are modelled estimates. They are not loss adjustments, official assessments, or professional insurance advice. They rest on documented simplifying assumptions, on aggregated exposure data, and on vulnerability functions calibrated at regional rather than event level. Differences from actual observed losses may be substantial.
+
+Method, code and assumptions are public. Text and figures CC BY-SA 4.0, code AGPL-3.0.
+
+Written and maintained by Ilyas Hammouti.
+
+
+INDUSTRY
+
+Research Services. Second choice, Insurance.
+
+
+PAGE TYPE AND SIZE
+
+Small business, 1 employee. The page states who writes it, so nothing here
+overstates what it is.
+
+
+SPECIALTIES (20 maximum, 14 used)
+
+Catastrophe modelling, natural catastrophe risk, flood risk, loss estimation,
+remote sensing, Earth observation, Sentinel-1, Copernicus, CLIMADA, exposure
+data, vulnerability functions, geospatial analysis, GIS, reinsurance.
+
+
+CUSTOM BUTTON
+
+Visit website, pointing at the repository. The method link is the one thing a
+reader has to be able to reach in one click.
+
+
+FIRST PINNED POST
+
+The type 4 loss estimate for Emilia-Romagna, EMSR664. It is the only one of
+the existing notebooks that runs the full chain to a currency figure, so it
+shows what the page is for on the first scroll.

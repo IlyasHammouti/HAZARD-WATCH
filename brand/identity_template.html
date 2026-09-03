@@ -1,0 +1,501 @@
+<title>Identité Hazard Watch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --ground: #FBFAF7;
+    --surface: #FFFFFF;
+    --surface-2: #F3F2EE;
+    --ink: #12161B;
+    --body: #3A424B;
+    --muted: #767E88;
+    --rule: #DEDCD6;
+    --rule-soft: #EAE8E2;
+    --brand-ink: #0B0E12;
+    --brand-paper: #F2F0EB;
+    --safe: #146C7D;
+    --keepout: #A82F66;
+    --safe-fill: rgba(20, 108, 125, .10);
+    --keepout-fill: rgba(168, 47, 102, .12);
+  }
+  :root:not([data-theme="light"]) {
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0E1116;
+      --surface: #151A20;
+      --surface-2: #1A2027;
+      --ink: #EDEFF2;
+      --body: #B4BCC5;
+      --muted: #7E8792;
+      --rule: #262E37;
+      --rule-soft: #1E252D;
+      --safe: #58BDD0;
+      --keepout: #E479AC;
+      --safe-fill: rgba(88, 189, 208, .12);
+      --keepout-fill: rgba(228, 121, 172, .14);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0E1116;
+    --surface: #151A20;
+    --surface-2: #1A2027;
+    --ink: #EDEFF2;
+    --body: #B4BCC5;
+    --muted: #7E8792;
+    --rule: #262E37;
+    --rule-soft: #1E252D;
+    --safe: #58BDD0;
+    --keepout: #E479AC;
+    --safe-fill: rgba(88, 189, 208, .12);
+    --keepout-fill: rgba(228, 121, 172, .14);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--body);
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.62;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 56px 28px 120px;
+    display: flex;
+    flex-direction: column;
+    gap: 72px;
+  }
+
+  h1, h2, h3 { color: var(--ink); margin: 0; text-wrap: balance; }
+
+  h1 {
+    font-family: Archivo, system-ui, sans-serif;
+    font-variation-settings: "wdth" 118, "wght" 760;
+    font-size: clamp(2.1rem, 5.4vw, 3.3rem);
+    line-height: 1.02;
+    letter-spacing: .012em;
+    text-transform: uppercase;
+  }
+  h2 {
+    font-family: Archivo, system-ui, sans-serif;
+    font-variation-settings: "wdth" 112, "wght" 700;
+    font-size: clamp(1.28rem, 2.6vw, 1.62rem);
+    line-height: 1.14;
+    letter-spacing: .022em;
+    text-transform: uppercase;
+  }
+  h3 {
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    font-size: 1.02rem;
+    font-weight: 600;
+    letter-spacing: .002em;
+  }
+
+  p { margin: 0; }
+  .lede { font-size: 1.08rem; max-width: 62ch; }
+  .note { color: var(--muted); font-size: .93rem; max-width: 68ch; }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .72rem;
+    letter-spacing: .17em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  section { display: flex; flex-direction: column; gap: 26px; }
+  .head { display: flex; flex-direction: column; gap: 8px; }
+  .head::after { content: ""; height: 1px; background: var(--rule); margin-top: 6px; }
+
+  /* ---------------------------------------------------------- masthead */
+  .masthead { display: flex; flex-direction: column; gap: 26px; }
+  .masthead-mark {
+    background: var(--brand-ink);
+    border-radius: 3px;
+    padding: 26px 20px;
+    display: flex;
+    justify-content: center;
+  }
+  .masthead-mark.light { background: var(--brand-paper); }
+  .masthead-mark img { width: min(100%, 720px); height: auto; display: block; }
+
+  .facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .fact { background: var(--surface); padding: 14px 16px; display: flex; flex-direction: column; gap: 3px; }
+  .fact dt {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .68rem; letter-spacing: .15em; text-transform: uppercase; color: var(--muted);
+  }
+  .fact dd { margin: 0; color: var(--ink); font-weight: 500; font-size: .95rem; }
+
+  /* ------------------------------------------------------------ assets */
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 20px; }
+
+  .asset { display: flex; flex-direction: column; gap: 10px; }
+  .asset .plate { border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; line-height: 0; }
+  .asset img { width: 100%; height: auto; display: block; }
+  .asset .cap {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .74rem; color: var(--muted); line-height: 1.5;
+  }
+  .asset .cap b { color: var(--ink); font-weight: 500; display: block; }
+
+  /* ------------------------------------------------------- banner spec */
+  .banner { display: flex; flex-direction: column; gap: 14px; }
+  .frame { position: relative; border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; line-height: 0; }
+  .frame img { width: 100%; height: auto; display: block; }
+
+  .layer { position: absolute; inset: 0; opacity: 0; transition: opacity .18s ease; pointer-events: none; }
+  body.show-zones .layer { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { .layer { transition: none; } }
+
+  .zone { position: absolute; border: 1px dashed currentColor; }
+  .zone > span {
+    position: absolute; left: 6px; top: 5px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+    line-height: 1.3; white-space: nowrap;
+  }
+  .zone.keep { color: var(--keepout); background: var(--keepout-fill); }
+  .zone.safe { color: var(--safe); background: var(--safe-fill); }
+  .zone.round { border-radius: 50%; }
+  .zone.round > span { left: 50%; top: 26%; transform: translateX(-50%); }
+
+  .toggle {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .78rem; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ink); cursor: pointer;
+    background: var(--surface); border: 1px solid var(--rule); border-radius: 3px;
+    padding: 9px 14px; width: fit-content;
+  }
+  .toggle input { accent-color: var(--keepout); width: 15px; height: 15px; margin: 0; }
+  .toggle:focus-within { outline: 2px solid var(--safe); outline-offset: 2px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 22px; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .74rem; color: var(--muted); }
+  .legend i { display: inline-block; width: 11px; height: 11px; border: 1px dashed currentColor; margin-right: 7px; vertical-align: -1px; }
+  .legend .k { color: var(--keepout); }
+  .legend .s { color: var(--safe); }
+
+  /* ------------------------------------------------------------- rules */
+  .rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 18px; }
+  .rule-card {
+    background: var(--surface); border: 1px solid var(--rule); border-radius: 3px;
+    padding: 16px 18px; display: flex; flex-direction: column; gap: 6px;
+  }
+  .rule-card b { color: var(--ink); font-weight: 600; }
+  .rule-card span { font-size: .92rem; }
+
+  /* -------------------------------------------------------------- copy */
+  .copyblock { border: 1px solid var(--rule); border-radius: 3px; background: var(--surface); overflow: hidden; }
+  .copyblock header {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    padding: 11px 16px; border-bottom: 1px solid var(--rule-soft); background: var(--surface-2);
+  }
+  .copyblock header .t {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .74rem; letter-spacing: .13em; text-transform: uppercase; color: var(--ink);
+  }
+  .copyblock header .c {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .72rem; color: var(--muted); font-variant-numeric: tabular-nums;
+  }
+  .copyblock pre {
+    margin: 0; padding: 18px 16px; white-space: pre-wrap; word-break: break-word;
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .82rem; line-height: 1.72;
+    color: var(--body); max-height: 460px; overflow: auto;
+  }
+  .btn {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .7rem; letter-spacing: .12em; text-transform: uppercase;
+    background: none; border: 1px solid var(--rule); border-radius: 3px;
+    color: var(--ink); padding: 5px 11px; cursor: pointer;
+  }
+  .btn:hover { border-color: var(--muted); }
+  .btn:focus-visible { outline: 2px solid var(--safe); outline-offset: 2px; }
+
+  /* ------------------------------------------------------------- table */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 3px; }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; background: var(--surface); }
+  th, td {
+    text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--rule-soft);
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .78rem;
+  }
+  th {
+    font-size: .68rem; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--muted); background: var(--surface-2); border-bottom: 1px solid var(--rule);
+  }
+  td { color: var(--body); font-variant-numeric: tabular-nums; }
+  td:first-child { color: var(--ink); }
+  tbody tr:last-child td { border-bottom: none; }
+
+  .swatches { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 12px; }
+  .sw { border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; }
+  .sw .chip { height: 56px; }
+  .sw .meta {
+    padding: 9px 11px; background: var(--surface);
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .72rem; color: var(--muted);
+  }
+  .sw .meta b { display: block; color: var(--ink); font-weight: 500; letter-spacing: .04em; }
+
+  footer { color: var(--muted); font-size: .86rem; border-top: 1px solid var(--rule); padding-top: 22px; }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Kit d'identité · août 2026</p>
+    <h1>Hazard Watch</h1>
+    <p class="lede">Logo typographique, bannières LinkedIn aux deux formats, et le texte de la page. Chaque visuel existe sur fond sombre et sur fond clair. Tout est monochrome, pour ne jamais entrer en conflit avec les couleurs d'accent par péril utilisées dans les graphiques des posts.</p>
+    <div class="masthead-mark"><img src="__IMG_HORIZ_INK__" alt="Lockup horizontal Hazard Watch, lettrage blanc sur fond noir encadré de repères d'angle"></div>
+    <div class="masthead-mark light"><img src="__IMG_HORIZ_PAPER__" alt="Lockup horizontal Hazard Watch, lettrage noir sur fond clair encadré de repères d'angle"></div>
+    <dl class="facts">
+      <div class="fact"><dt>Caractère</dt><dd>Bahnschrift, poids 600</dd></div>
+      <div class="fact"><dt>Secondaire</dt><dd>Cascadia Mono</dd></div>
+      <div class="fact"><dt>Couleurs</dt><dd>2, aucune accentuation</dd></div>
+      <div class="fact"><dt>Fichiers</dt><dd>14 PNG + le script</dd></div>
+    </dl>
+  </header>
+
+  <section>
+    <div class="head">
+      <p class="eyebrow">Le logo</p>
+      <h2>Un mot-symbole, pas une icône</h2>
+    </div>
+    <p class="note">Le lettrage est du Bahnschrift, la variante DIN livrée avec Windows : c'est la lettre des panneaux techniques et des plans, pas celle d'une marque grand public. Les deux mots sont chassés à la même largeur exacte, ce qui est le seul geste de composition du logo. Les quatre équerres autour du bloc sont des repères d'emprise, la façon dont une zone d'intérêt se marque sur une image satellite.</p>
+
+    <div class="grid-3">
+      <figure class="asset" style="margin:0">
+        <div class="plate"><img src="__IMG_AVATAR_INK__" alt="Logo carré Hazard Watch en blanc sur fond noir"></div>
+        <figcaption class="cap"><b>logo-avatar-ink.png</b>800 × 800 · logo de la page LinkedIn</figcaption>
+      </figure>
+      <figure class="asset" style="margin:0">
+        <div class="plate"><img src="__IMG_AVATAR_PAPER__" alt="Logo carré Hazard Watch en noir sur fond clair"></div>
+        <figcaption class="cap"><b>logo-avatar-paper.png</b>800 × 800 · fonds clairs, documents</figcaption>
+      </figure>
+      <figure class="asset" style="margin:0">
+        <div class="plate"><img src="__IMG_MONO_INK__" alt="Monogramme HW en blanc sur fond noir"></div>
+        <figcaption class="cap"><b>logo-monogram-ink.png</b>800 × 800 · en dessous de 64 px</figcaption>
+      </figure>
+      <figure class="asset" style="margin:0">
+        <div class="plate"><img src="__IMG_MONO_PAPER__" alt="Monogramme HW en noir sur fond clair"></div>
+        <figcaption class="cap"><b>logo-monogram-paper.png</b>800 × 800 · idem, fond clair</figcaption>
+      </figure>
+    </div>
+
+    <div class="rules">
+      <div class="rule-card"><b>Taille minimale</b><span>48 px pour le mot-symbole complet. Dans le fil LinkedIn l'avatar tombe à 48 px : c'est le seuil où « HAZARD WATCH » se referme et où le monogramme prend le relais.</span></div>
+      <div class="rule-card"><b>Cadrage des équerres</b><span>Le script mesure la boîte d'encre réelle du lettrage, pas sa largeur d'approche, et pose les quatre repères à distance égale des quatre côtés. Une vérification refuse le rendu si l'écart dépasse 2 px.</span></div>
+      <div class="rule-card"><b>Air autour</b><span>Une hauteur de capitale sur les quatre côtés, mesurée depuis les équerres et non depuis les lettres.</span></div>
+      <div class="rule-card"><b>Ce qu'on ne fait pas</b><span>Pas de déformation, pas de contour, pas d'ombre, pas de couleur ajoutée. Les accents de couleur restent réservés aux périls dans les cartes.</span></div>
+    </div>
+
+    <p class="eyebrow" style="margin-top:6px">Sur fond sombre</p>
+    <div class="swatches">
+      <div class="sw"><div class="chip" style="background:#0B0E12"></div><div class="meta"><b>#0B0E12</b>Encre, le fond</div></div>
+      <div class="sw"><div class="chip" style="background:#F2F0EB"></div><div class="meta"><b>#F2F0EB</b>Papier, le lettrage</div></div>
+      <div class="sw"><div class="chip" style="background:#8B929B"></div><div class="meta"><b>#8B929B</b>Texte secondaire</div></div>
+      <div class="sw"><div class="chip" style="background:#767D87"></div><div class="meta"><b>#767D87</b>Texte tertiaire</div></div>
+      <div class="sw"><div class="chip" style="background:#2A323B"></div><div class="meta"><b>#2A323B</b>Filets</div></div>
+    </div>
+    <p class="eyebrow">Sur fond clair · les deux premières valeurs échangent leurs rôles</p>
+    <div class="swatches">
+      <div class="sw"><div class="chip" style="background:#F2F0EB"></div><div class="meta"><b>#F2F0EB</b>Papier, le fond</div></div>
+      <div class="sw"><div class="chip" style="background:#0B0E12"></div><div class="meta"><b>#0B0E12</b>Encre, le lettrage</div></div>
+      <div class="sw"><div class="chip" style="background:#4E555E"></div><div class="meta"><b>#4E555E</b>Texte secondaire</div></div>
+      <div class="sw"><div class="chip" style="background:#6B727C"></div><div class="meta"><b>#6B727C</b>Texte tertiaire</div></div>
+      <div class="sw"><div class="chip" style="background:#C9C6BE"></div><div class="meta"><b>#C9C6BE</b>Filets</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <p class="eyebrow">Layout</p>
+      <h2>Les zones que LinkedIn recouvre</h2>
+    </div>
+    <p class="note">Les deux bannières sont composées autour de ce que l'interface vient poser par-dessus. Coche la case pour voir les réserves : en magenta ce que LinkedIn recouvre, en cyan la marge de sécurité que je garde en plus, parce que le recadrage mobile rogne les bords et que sa géométrie exacte n'est pas publiée.</p>
+
+    <label class="toggle"><input type="checkbox" id="zones"> Afficher les zones réservées</label>
+    <div class="legend">
+      <span class="k"><i></i>Recouvert par LinkedIn</span>
+      <span class="s"><i></i>Marge de sécurité</span>
+    </div>
+
+    <div class="banner">
+      <p class="eyebrow">Page LinkedIn · 1128 × 191</p>
+      <div class="frame">
+        <img src="__IMG_COVER_INK__" alt="Bannière de page LinkedIn, version sombre : l'équation Hazard × Exposure × Vulnerability = Loss en blanc sur fond noir, suivie de deux lignes en caractères à chasse fixe">
+        <div class="layer">
+          <div class="zone keep" style="left:0;top:0;width:17.4%;height:100%"><span>Logo de la page</span></div>
+          <div class="zone safe" style="left:18.6%;top:12%;width:79.4%;height:76%"><span>Zone de texte</span></div>
+        </div>
+      </div>
+      <div class="frame">
+        <img src="__IMG_COVER_PAPER__" alt="Même bannière de page LinkedIn, version claire : lettrage noir sur fond blanc cassé">
+        <div class="layer">
+          <div class="zone keep" style="left:0;top:0;width:17.4%;height:100%"><span>Logo de la page</span></div>
+          <div class="zone safe" style="left:18.6%;top:12%;width:79.4%;height:76%"><span>Zone de texte</span></div>
+        </div>
+      </div>
+      <p class="note">Le logo carré vient se poser en bas à gauche et déborde sous la bannière. Rien ne va à gauche de 200 px : la réserve reste vide, sans filet ni marque, et le texte commence après. Trois niveaux seulement, parce que 191 px de haut n'en admettent pas plus : l'équation, la ligne de méthode, l'avertissement.</p>
+    </div>
+
+    <div class="banner">
+      <p class="eyebrow">Profil personnel · 1584 × 396</p>
+      <div class="frame">
+        <img src="__IMG_BANNER_INK__" alt="Bannière de profil LinkedIn, version sombre : mot-symbole Hazard Watch en haut à gauche, équation au centre, et trois lignes de références techniques et académiques">
+        <div class="layer">
+          <div class="zone keep round" style="left:4.2%;top:54%;width:17%;padding-bottom:17%;height:0"><span>Photo</span></div>
+          <div class="zone keep" style="left:0;top:53%;width:25.3%;height:47%"><span></span></div>
+          <div class="zone safe" style="left:27.1%;top:11%;width:67.5%;height:81%"><span>Zone de texte</span></div>
+        </div>
+      </div>
+      <div class="frame">
+        <img src="__IMG_BANNER_PAPER__" alt="Même bannière de profil LinkedIn, version claire : lettrage noir sur fond blanc cassé">
+        <div class="layer">
+          <div class="zone keep round" style="left:4.2%;top:54%;width:17%;padding-bottom:17%;height:0"><span>Photo</span></div>
+          <div class="zone keep" style="left:0;top:53%;width:25.3%;height:47%"><span></span></div>
+          <div class="zone safe" style="left:27.1%;top:11%;width:67.5%;height:81%"><span>Zone de texte</span></div>
+        </div>
+      </div>
+      <p class="note">La photo de profil occupe le bas à gauche et déborde également. Le bloc principal démarre donc à 430 px, hors d'atteinte. Le mot-symbole se loge au-dessus de la photo, dans les 200 px du haut, et la ligne de disponibilité reste dans la moitié droite, là où le recadrage mobile ne va pas la chercher.</p>
+    </div>
+
+    <p class="note">La version claire n'est pas un blanc pur : c'est le <code>#F2F0EB</code> du lettrage de la version sombre, réutilisé en fond. Un blanc écran fait ressortir la trame de fond et durcit le noir du texte ; ce blanc cassé tient sur les deux supports et reste le même papier d'un visuel à l'autre.</p>
+  </section>
+
+  <section>
+    <div class="head">
+      <p class="eyebrow">Texte de la page</p>
+      <h2>Prêt à coller</h2>
+    </div>
+    <p class="note">En anglais, comme tout ce que le projet publie. Le texte passe les deux contrôles de <code>docs/EDITORIAL_RULES.md</code> section 9.5 : aucun tiret cadratin, aucun terme de la liste interdite, aucune amorce d'engagement. L'avertissement est la chaîne verrouillée <code>L-DISC-FULL</code>, reprise mot pour mot.</p>
+
+    <div class="copyblock">
+      <header><span class="t">Slogan</span><span class="c">68 / 120 caractères <button class="btn" data-copy>Copier</button></span></header>
+      <pre>Satellite-observed footprints, modelled loss estimates, open method.</pre>
+    </div>
+
+    <div class="copyblock">
+      <header><span class="t">À propos</span><span class="c">1 704 / 2 000 caractères <button class="btn" data-copy>Copier</button></span></header>
+      <pre>Hazard Watch publishes quantified damage estimates for natural catastrophes, from satellite observation to a figure in currency, with every assumption written down.
+
+A catastrophe model rests on one identity:
+
+Hazard × Exposure × Vulnerability = Loss
+
+Public services usually stop at the physical footprint. Financial estimates come from private providers behind closed methods. This page works in the space between the two.
+
+What a bulletin carries:
+
+- Hazard. Flood footprint from a before and after comparison of Sentinel-1 radar imagery, which sees through the cloud cover present during an event.
+- Exposure. Built-up value from open datasets, GHSL and LitPop.
+- Vulnerability. Depth-damage functions published by the Joint Research Centre of the European Commission.
+- Loss. The three combined through CLIMADA, the open framework from ETH Zurich.
+
+Every post carrying a number states its output tier. Tier 1 is a modelled loss in currency. Tier 2 is exposed value and affected population. Tier 3 is physical extent only. A reader knows what a figure is worth before reading it.
+
+When official or industry figures are published for an event, the estimate is compared against them here, in whichever direction the gap goes.
+
+All figures here are modelled estimates. They are not loss adjustments, official assessments, or professional insurance advice. They rest on documented simplifying assumptions, on aggregated exposure data, and on vulnerability functions calibrated at regional rather than event level. Differences from actual observed losses may be substantial.
+
+Method, code and assumptions are public. Text and figures CC BY-SA 4.0, code AGPL-3.0.
+
+Written and maintained by Ilyas Hammouti.</pre>
+    </div>
+
+    <div class="copyblock">
+      <header><span class="t">Spécialités</span><span class="c">14 / 20 entrées <button class="btn" data-copy>Copier</button></span></header>
+      <pre>Catastrophe modelling, natural catastrophe risk, flood risk, loss estimation, remote sensing, Earth observation, Sentinel-1, Copernicus, CLIMADA, exposure data, vulnerability functions, geospatial analysis, GIS, reinsurance</pre>
+    </div>
+
+    <div class="rules">
+      <div class="rule-card"><b>Secteur</b><span>Research Services, à défaut Insurance. La page mesure et publie, elle ne vend pas de couverture.</span></div>
+      <div class="rule-card"><b>Type et taille</b><span>Small business, 1 personne. Le texte dit qui l'écrit, donc rien n'y surestime ce que c'est.</span></div>
+      <div class="rule-card"><b>Bouton</b><span>Visit website vers le dépôt. Le lien de méthode doit s'atteindre en un clic, c'est tout l'objet du projet.</span></div>
+      <div class="rule-card"><b>Premier post épinglé</b><span>L'estimation de perte EMSR664, Émilie-Romagne. C'est le seul notebook qui va jusqu'au chiffre en euros.</span></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <p class="eyebrow">Fichiers</p>
+      <h2>Ce qui a été produit</h2>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Fichier</th><th>Format</th><th>Usage</th></tr></thead>
+        <tbody>
+          <tr><td>logo-avatar-ink.png</td><td>800 × 800</td><td>Logo de la page LinkedIn</td></tr>
+          <tr><td>logo-avatar-paper.png</td><td>800 × 800</td><td>Fonds clairs, documents, slides</td></tr>
+          <tr><td>logo-monogram-ink.png</td><td>800 × 800</td><td>Avatar en dessous de 64 px</td></tr>
+          <tr><td>logo-monogram-paper.png</td><td>800 × 800</td><td>Idem, fond clair</td></tr>
+          <tr><td>logo-horizontal-ink.png</td><td>2400 × 600</td><td>Pied de page, en-tête de rapport</td></tr>
+          <tr><td>logo-horizontal-paper.png</td><td>2400 × 600</td><td>Idem, fond clair</td></tr>
+          <tr><td>linkedin-page-cover-ink-1128x191.png</td><td>1128 × 191</td><td>Couverture de page, taille exacte</td></tr>
+          <tr><td>linkedin-page-cover-paper-1128x191.png</td><td>1128 × 191</td><td>Idem, fond clair</td></tr>
+          <tr><td>linkedin-page-cover-ink-2256x382.png</td><td>2256 × 382</td><td>Même image en double densité</td></tr>
+          <tr><td>linkedin-page-cover-paper-2256x382.png</td><td>2256 × 382</td><td>Idem, fond clair</td></tr>
+          <tr><td>linkedin-profile-banner-ink-1584x396.png</td><td>1584 × 396</td><td>Bannière de profil, taille exacte</td></tr>
+          <tr><td>linkedin-profile-banner-paper-1584x396.png</td><td>1584 × 396</td><td>Idem, fond clair</td></tr>
+          <tr><td>linkedin-profile-banner-ink-3168x792.png</td><td>3168 × 792</td><td>Même image en double densité</td></tr>
+          <tr><td>linkedin-profile-banner-paper-3168x792.png</td><td>3168 × 792</td><td>Idem, fond clair</td></tr>
+          <tr><td>linkedin-page.txt</td><td>texte</td><td>Slogan, à propos, spécialités</td></tr>
+          <tr><td>build_brand.py</td><td>script</td><td>Regénère tout, c'est la source</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">Les fichiers vivent dans <code>brand/</code>. Le script est la source réelle : changer une ligne de la bannière se fait dedans, puis <code>python build_brand.py</code>, et les quatorze images se refont ensemble, les deux variantes depuis la même composition. Il se termine par une vérification qui échoue si une zone réservée cesse d'être vide, ou si les équerres se décentrent de plus de 2 px.</p>
+  </section>
+
+  <footer>
+    Hazard Watch · identité produite le 30 août 2026 · le contenu des bannières reprend les chaînes verrouillées de <code>docs/EDITORIAL_RULES.md</code> version 2.0.
+  </footer>
+
+</div>
+
+<script>
+  document.getElementById("zones").addEventListener("change", function (e) {
+    document.body.classList.toggle("show-zones", e.target.checked);
+  });
+
+  document.querySelectorAll("[data-copy]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var pre = btn.closest(".copyblock").querySelector("pre");
+      var done = function () {
+        var old = btn.textContent;
+        btn.textContent = "Copié";
+        setTimeout(function () { btn.textContent = old; }, 1400);
+      };
+      try {
+        navigator.clipboard.writeText(pre.textContent).then(done, function () { select(pre); });
+      } catch (err) {
+        select(pre);
+      }
+    });
+  });
+
+  function select(pre) {
+    var r = document.createRange();
+    r.selectNodeContents(pre);
+    var s = window.getSelection();
+    s.removeAllRanges();
+    s.addRange(r);
+  }
+</script>

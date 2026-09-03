@@ -1,0 +1,66 @@
+Flood in Rasuwa, Nepal: what the responders counted
+
+Copernicus EMS operators graded 4 485 buildings in Rasuwa, Nepal, and recorded 3 438 of them destroyed, from imagery read 45 hours after the event.
+
+This updates the version published earlier this week. Copernicus has since delivered a fourth graded area, Phosretar, and revised the grading for Bidur. Bharatpur and Kyundi are not yet delivered.
+
+What happened
+
+The event was 26 August 2026 at 03:45 local time (2026-08-25 22:00 UTC). Copernicus recorded the reason for the activation as follows.
+
+"On the 26 August 2026, a flash flood reportedly triggered by a Glacial Lake Outburst Flood (GLOF) in Nepal has caused significant damage in Rasuwa District. There is a 7 m-deep water level recorded by monitoring stations. Copernicus EMS Rapid Mapping is requested to provide flood extent and damage assessment emergency mapping."
+
+What was mapped
+
+The figures below were published by Copernicus EMS Rapid Mapping and are reproduced here with that attribution. They are counts made by its operators, not outputs of this pipeline, and the output tier above does not apply to them.
+
+- Buildings graded: 4 485, of which 3 438 destroyed and 1 047 damaged
+- Area mapped as affected: 13.7 km2, typed Landslide
+- Roads: 69.1 km destroyed of 265.0 km graded
+- Destroyed and named in the product: Langtang Khola Hydroelectric Power House 20MW
+- Destroyed and named in the product: Rasuwagadhi Hydropower Dam
+- Destroyed and named in the product: Trishuli Power House
+
+The activation opened 12 hours after the event and the first graded product was delivered 45 hours after it.
+
+What this project adds
+
+- Modelled loss: €42M to €45M
+- Exposed value of the graded buildings: €54M
+- Population inside the mapped area: 7 600
+
+Figures are in EUR, base year 2014, converted at 2023 rates. No inflation adjustment or conversion is applied unless the rate and its year are stated alongside.
+
+Those figures are this project's, computed on the footprint Copernicus mapped rather than on one of our own. An independent footprint count (Google Open Buildings) finds 4 346 structures inside the same polygons. Copernicus graded 4 485, at least as many; the destroyed share above is not read against a small sample.
+
+What the counts do not cover
+
+Copernicus EMS marks 0.14 km2 of the ground it was asked to map as not analysed, 0.1% of the total. Nothing inside it is counted, by them or here.
+
+Public infrastructure, agriculture and vehicles are outside the model. Only private built assets are counted.
+
+What is not known yet
+
+Bharatpur, Kyundi are inside the activation and have not been graded yet, so nothing here counts them. What each building is worth comes from an aggregated national exposure dataset rather than from any local valuation. At the two lower damage grades, the share of that value lost is assumed. No official or industry cost figure has been published for this event.
+
+Method
+
+Output tier 1 of 3: modelled loss in currency. This applies to figures this pipeline computed. Figures attributed to another source are reported as published.
+
+Extent mapped by Copernicus EMS operators from very high resolution imagery, by photo-interpretation. Exposure from GHSL and LitPop. Loss is the replacement share of each building's recorded damage grade, summed. No water depth is assumed and no depth-damage curve is used.
+
+When official or industry figures are published for this event, this estimate will be compared against them here, in whichever direction the gap goes.
+
+Method, code and assumptions: https://github.com/ihammouti/hazard-watch
+
+Sources
+
+Damage counts and mapped extent: Copernicus Emergency Management Service, Rapid Mapping, grading products for activation EMSR927, mapped by photo-interpretation of very high resolution imagery.
+
+Exposure: GHSL built-up surface and population (European Commission, Joint Research Centre).
+
+Exposure value: LitPop, a dataset published by ETH Zurich through the CLIMADA package, constant 2014 USD. The loss above is computed by this pipeline, not by CLIMADA's own engine.
+
+All figures here are modelled estimates. They are not loss adjustments, official assessments, or professional insurance advice. The damage itself was observed and graded by Copernicus EMS operators. What this pipeline adds is a value for each graded building, from an aggregated national dataset rather than any local valuation. That value, and the share of it lost at each grade, are where the uncertainty sits.
+
+Text and figures CC BY-SA 4.0. Code AGPL-3.0.
