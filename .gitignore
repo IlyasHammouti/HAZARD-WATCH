@@ -1,0 +1,72 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Data & Caches
+climada_flood/data/cache/
+climada_flood/data/ems/
+climada_flood/data/ems_reference/
+climada_flood/data/manual/
+climada_flood/output/
+climada_flood/notebooks/output/
+
+# Exports & Large Binaries
+*.zip
+*.tar.gz
+*.gpkg
+*.tif
+*.tiff
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+
+# Local outputs
+output/
+exports/
+results/
+.cache/
+tmp/
+temp/
+
+# Project-specific
+.claude/settings.local.json
+EMSR/
+
+# Environment
+.env
+.env.local
+.env.*.local
