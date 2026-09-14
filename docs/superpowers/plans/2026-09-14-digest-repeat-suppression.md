@@ -471,8 +471,8 @@ EOF
 - Modify: `climada_flood/report.py:2536-2656` (`weekly_digest`)
 - Modify: `climada_flood/templates/01-weekly-digest.md:37-39`
 - Create (generated, not hand-written): `climada_flood/data/cache/digest_featured.json` (seed)
-- Regenerate: `climada_flood/output/digests/2026-09-14-digest.txt`,
-  `.md`, `.png`
+- Regenerate (local output only, git-ignored, not committed):
+  `climada_flood/output/digests/2026-09-14-digest.txt`, `.md`, `.png`
 
 **Interfaces:**
 - Consumes: everything from Tasks 1-3 (`_filter_unfeatured`,
@@ -669,8 +669,15 @@ exact line numbers before continuing.
 
 - [ ] **Step 7: Commit**
 
+`climada_flood/output/` is git-ignored (`climada_flood/.gitignore` /
+root `.gitignore:43`); confirm with `git status --porcelain --ignored
+climada_flood/output/digests/` before adding anything from that folder -
+regenerated digest files are local output, not committed, regardless of
+whether an older digest under that path happens to already be tracked from
+before the ignore rule existed.
+
 ```bash
-git add climada_flood/report.py climada_flood/templates/01-weekly-digest.md climada_flood/output/digests/2026-09-14-digest.txt climada_flood/output/digests/2026-09-14-digest.md climada_flood/output/digests/2026-09-14-digest.png
+git add climada_flood/report.py climada_flood/templates/01-weekly-digest.md
 git commit -m "$(cat <<'EOF'
 Wire repeat suppression and Green top-ups into weekly_digest()
 
