@@ -37,6 +37,7 @@ ROOT = Path(__file__).parent
 CACHE = ROOT / "data" / "cache"
 OUTPUT = ROOT / "output"
 TEMPLATES = ROOT / "templates"
+FEATURED_HISTORY_PATH = CACHE / "digest_featured.json"
 
 # Conversion applied only where a figure is republished in a second currency.
 # The source currency and base year always travel with the number.
@@ -2570,6 +2571,26 @@ def _drop_empty_sections(text: str) -> str:
     filled with a sentence saying it is empty.
     """
     return re.sub(r"^##[^\n]*\n\s*(?=(##|---|\Z))", "", text, flags=re.MULTILINE)
+
+
+def _load_featured_history(path: Path = FEATURED_HISTORY_PATH) -> dict:
+    """`event_id` (string) -> `{"first_shown": iso date, "name": ...}`.
+
+    Empty when the file does not exist yet - the first run after this
+    feature ships starts with nothing suppressed, which is why Task 4 seeds
+    it once by hand for the events already published by name.
+    """
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _save_featured_history(history: dict,
+                           path: Path = FEATURED_HISTORY_PATH) -> None:
+    """Persist the full history dict, creating the cache folder if needed."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(history, indent=2, sort_keys=True),
+                    encoding="utf-8")
 
 
 def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),

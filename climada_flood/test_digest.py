@@ -443,6 +443,24 @@ def test_pick_top_unexcluded_ranks_by_alert_score_and_skips_excluded():
     assert natcat._pick_top_unexcluded([no_score, low], frozenset())["event_id"] == 1
 
 
+def test_featured_history_round_trips_through_json():
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "digest_featured.json"
+        assert report._load_featured_history(path) == {}
+
+        history = {"1104081": {"first_shown": "2026-09-14", "name": "Flood in China"}}
+        report._save_featured_history(history, path)
+        assert report._load_featured_history(path) == history
+
+        report._save_featured_history(
+            {**history, "2": {"first_shown": "2026-09-14", "name": "x"}}, path)
+        reloaded = report._load_featured_history(path)
+        assert set(reloaded) == {"1104081", "2"}
+
+
 if __name__ == "__main__":
     checks = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for check in checks:
