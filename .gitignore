@@ -65,6 +65,7 @@ temp/
 # Project-specific
 .claude/settings.local.json
 EMSR/
+climada_petals/
 
 # Environment
 .env
