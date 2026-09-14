@@ -17,9 +17,11 @@ memory:
 
 from __future__ import annotations
 
+import http.client
 import json
 import math
 import statistics
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -291,12 +293,49 @@ def _ghsl_built_fraction(aoi: tuple, profile: dict, shape: tuple) -> np.ndarray:
 LOCATABLE_PERILS = ("EQ", "WF", "VO")
 
 
+def ensure_ee() -> bool:
+    """Initialise Earth Engine if the session has not already done it.
+
+    Every Earth Engine caller here opens with its own `ee.Initialize`, and the
+    one that did not was `event_regions`, reached through the weekly digest.
+    It failed soft, so two digests published with no region name on any event
+    and nothing anywhere said why.
+
+    Returns True when Earth Engine is usable. Callers that can do without it
+    check the return value; callers that cannot let their own call raise.
+    """
+    try:
+        import ee
+    except ImportError:
+        return False
+    try:
+        ee.Number(1).getInfo()          # already initialised and authorised
+        return True
+    except Exception:                                          # noqa: BLE001
+        pass
+    try:
+        ee.Initialize(project=EE_PROJECT)
+        return True
+    except Exception:                                          # noqa: BLE001
+        return False
+
+
+def _clean_region(name) -> str:
+    """A GAUL name, or an empty string where GAUL has no usable one."""
+    name = (name or "").strip()
+    low = name.lower()
+    if not name or "unknown" in low or "not available" in low:
+        return ""
+    return name
+
+
 def event_regions(events: list) -> dict:
     """First-level administrative region for events whose point is the event.
 
     Returns `{event_id: region name}`, and an empty dictionary if Earth Engine
     is unavailable. The digest runs on plain HTTP otherwise, and losing a
-    region name is not a reason to lose the week's post.
+    region name is not a reason to lose the week's post — but it is a reason
+    to say so, which is what the warning is for.
 
     Only the first administrative level is used. GAUL's second level returns
     `Name Unknown` and `Administrative unit not available` often enough that it
@@ -306,6 +345,14 @@ def event_regions(events: list) -> dict:
               if e["event_type"] in LOCATABLE_PERILS
               and "," not in (e.get("country") or "")]
     if not wanted:
+        return {}
+
+    if not ensure_ee():
+        warnings.warn(
+            f"Earth Engine unavailable: {len(wanted)} events keep their "
+            f"country and lose their region name.",
+            stacklevel=2,
+        )
         return {}
 
     try:
@@ -320,15 +367,35 @@ def event_regions(events: list) -> dict:
         located = points.map(lambda f: f.set(
             gaul.filterBounds(f.geometry()).first().toDictionary(["ADM1_NAME"])))
         rows = located.getInfo()["features"]
-    except Exception:                                          # noqa: BLE001
+    except Exception as error:                                 # noqa: BLE001
+        warnings.warn(f"Region lookup failed, countries only: {error}",
+                      stacklevel=2)
         return {}
 
     regions = {}
     for row in rows:
-        name = (row["properties"] or {}).get("ADM1_NAME")
-        if name and "unknown" not in name.lower() and "not available" not in name.lower():
+        name = _clean_region((row["properties"] or {}).get("ADM1_NAME"))
+        if name:
             regions[row["properties"]["event_id"]] = name
     return regions
+
+
+# Why floods carry no region, measured rather than assumed.
+#
+# The obvious fix for "Flood, Nepal" is to name the region from the polygon
+# GDACS publishes with the event instead of from its centroid. It was built,
+# and then checked against the one event with independent ground truth:
+# Copernicus EMS mapped EMSR927 in Rasuwa district, Bagmati.
+#
+# The GDACS `Poly_Affected` polygon for that event puts 90.7 % of its area in
+# Narayani, 5.1 % in Bagmati. It is a GLOFAS basin response, not an observed
+# footprint, so it is wrong in the same direction and by the same 100 km as
+# the centroid. Ranking regions by overlap without a country filter was worse
+# still: the Trishuli headwaters reach into Tibet, and the largest share went
+# to Xizang Zizhiqu, in China, for an event in Nepal.
+#
+# A flood therefore keeps its country and nothing else until this project has
+# its own extent for it, which is what post types 3 and 8 exist to publish.
 
 
 def population(aoi: tuple, profile: dict, shape: tuple) -> np.ndarray:
@@ -568,6 +635,13 @@ CDSE_PRODUCTS = "https://catalogue.dataspace.copernicus.eu/odata/v1/Products"
 # past it. A query that comes back exactly full is almost certainly truncated.
 GDACS_CAP = 100
 
+# The Earth Engine project this pipeline bills to. Initialisation used to be
+# left entirely to the caller, which is why the weekly digest published two
+# weeks running with no region names: `event_regions` catches every exception
+# and returns an empty mapping, so an uninitialised session degraded the post
+# in silence rather than failing.
+EE_PROJECT = "zeta-bonfire-478712-n9"
+
 # Perils GDACS publishes. Tsunami ("TS") exists as a code but is folded into
 # the earthquake feed in practice, so it is not queried by default.
 GDACS_PERILS = {
@@ -584,18 +658,39 @@ GDACS_TYPES = tuple(GDACS_PERILS)
 GFM_LATENCY_HOURS = 19
 
 
-def _get_json(url: str, params: dict | None = None, timeout: int = 90):
+def _get_json(url: str, params: dict | None = None, timeout: int = 90,
+              tries: int = 4, backoff: float = 5.0):
     """Fetch a URL and parse the JSON body, returning None when it is empty.
 
     GDACS answers a query with no matches using HTTP 204 and a zero-length
     body rather than an empty list, which would crash a plain `json.loads`.
+
+    It also answers the same URL with 200, HTTP 400 or a read timeout
+    depending on the minute. Measured on 7 September 2026: the identical
+    event-list query returned 400, then 400, then a timeout, then 200, over
+    six minutes. A single attempt therefore fails the Monday digest against a
+    service that is working, so each call is retried before it is believed.
+    The last failure is raised, so a service that is genuinely down still
+    stops the run rather than returning a quietly empty week.
     """
     if params:
         url = url + "?" + urllib.parse.urlencode(params)
     request = urllib.request.Request(url, headers={"User-Agent": "natcat"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        raw = response.read()
-    return json.loads(raw) if raw else None
+
+    for attempt in range(tries):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                raw = response.read()
+            return json.loads(raw) if raw else None
+        except (OSError, http.client.HTTPException, ValueError) as error:
+            if attempt == tries - 1:
+                raise
+            warnings.warn(
+                f"{type(error).__name__} from {url.split('?')[0]}, "
+                f"retry {attempt + 1} of {tries - 1}",
+                stacklevel=2,
+            )
+            time.sleep(backoff * (attempt + 1))
 
 
 def gdacs_events(
@@ -669,6 +764,51 @@ def gdacs_events(
     return events
 
 
+def _pick_top_unexcluded(events: list, exclude_ids) -> dict | None:
+    """The event with the highest `alert_score`, skipping excluded ids.
+
+    `alert_score` is a real field GDACS publishes on every event; nothing
+    here invents a ranking. A missing score sorts as 0 rather than raising,
+    since GDACS does not guarantee it is always present.
+    """
+    eligible = [e for e in events if str(e["event_id"]) not in exclude_ids]
+    if not eligible:
+        return None
+    return max(eligible, key=lambda e: e.get("alert_score") or 0)
+
+
+def top_green_per_type(types: tuple, days: int = 7, end: date | None = None,
+                        exclude_ids=frozenset()) -> list:
+    """The single most severe Green-level event for each peril type.
+
+    One GDACS query per type in `types`, mirroring the per-type loop
+    `gdacs_events` already runs. A type with no Green event at all, or
+    whose every candidate is in `exclude_ids`, is simply absent from the
+    result - never filled with a lesser stand-in, and never raises.
+
+    Parameters
+    ----------
+    types : peril codes to fetch; typically whatever `weekly_digest` found
+        no eligible Orange/Red event for this week.
+    days, end : the same window `gdacs_events` takes.
+    exclude_ids : event ids (as strings) that must not be picked however
+        high their score - the digest's featured-event history.
+
+    Returns
+    -------
+    List of event dictionaries, same shape `gdacs_events` returns, at most
+    one per type in `types`, in the order `types` was given.
+    """
+    picks = []
+    for peril in types:
+        candidates = gdacs_events(days=days, types=(peril,), end=end,
+                                   alert_levels=("Green",))
+        pick = _pick_top_unexcluded(candidates, exclude_ids)
+        if pick is not None:
+            picks.append(pick)
+    return picks
+
+
 def _gdacs_event(feature: dict, window_start: date) -> dict:
     """Flatten one GDACS GeoJSON feature into a plain dictionary.
 
@@ -685,6 +825,7 @@ def _gdacs_event(feature: dict, window_start: date) -> dict:
         "event_id": p["eventid"],
         "episode_id": p["episodeid"],
         "name": p["name"],
+        "event_name": (p.get("eventname") or "").strip(),
         "country": p.get("country", ""),
         "iso3": p.get("iso3", ""),
         "alert_level": p["alertlevel"],
@@ -748,6 +889,43 @@ def clip_aoi(aoi: tuple, max_km: float = PASS_QUERY_MAX_KM) -> tuple:
     return (lon_c - half_lon, lat_c - half_lat, lon_c + half_lon, lat_c + half_lat)
 
 
+def gdacs_geometry(event: dict) -> list:
+    """The polygons GDACS publishes for an event, as GeoJSON features.
+
+    Two callers want these: `gdacs_aoi`, which reduces them to one bounding
+    box, and `flood_regions`, which needs the shapes themselves. Fetching them
+    once, here, keeps the two from disagreeing about what the affected area is.
+
+    Dropped on the way out: the point geometry, which is the centroid the
+    event list already carries, and the "global area" polygon, which spans
+    whole continents and describes nothing.
+
+    Fails soft and returns an empty list. GDACS answers this endpoint with a
+    timeout, an HTTP 400 or a dropped connection often enough that treating an
+    outage as fatal would cost the week's post over a service that is usually
+    back within the hour.
+    """
+    try:
+        payload = _get_json(
+            GDACS_GEOMETRY,
+            {
+                "eventtype": event["event_type"],
+                "eventid": event["event_id"],
+                "episodeid": event["episode_id"],
+            },
+            timeout=60,
+        )
+    except (OSError, http.client.HTTPException, ValueError):
+        return []
+
+    return [
+        f
+        for f in (payload or {}).get("features", [])
+        if (f.get("geometry") or {}).get("type") != "Point"
+        and (f.get("properties") or {}).get("Class") != "Poly_Global"
+    ]
+
+
 def gdacs_aoi(event: dict, radius_km: float = 25.0) -> tuple:
     """Area of interest for a GDACS event: (min_lon, min_lat, max_lon, max_lat).
 
@@ -761,26 +939,7 @@ def gdacs_aoi(event: dict, radius_km: float = 25.0) -> tuple:
     downstream service here takes a box, and a box never has to be repaired
     for self-intersections.
     """
-    try:
-        payload = _get_json(
-            GDACS_GEOMETRY,
-            {
-                "eventtype": event["event_type"],
-                "eventid": event["event_id"],
-                "episodeid": event["episode_id"],
-            },
-            timeout=60,
-        )
-    except (urllib.error.URLError, TimeoutError):
-        payload = None
-
-    boxes = [
-        f["bbox"]
-        for f in (payload or {}).get("features", [])
-        if f.get("bbox")
-        and f["geometry"]["type"] != "Point"
-        and f["properties"].get("Class") != "Poly_Global"
-    ]
+    boxes = [f["bbox"] for f in gdacs_geometry(event) if f.get("bbox")]
 
     if not boxes:
         return _bbox_around(event["lon"], event["lat"], radius_km)
