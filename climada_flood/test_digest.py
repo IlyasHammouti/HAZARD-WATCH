@@ -425,6 +425,24 @@ def test_own_detection_is_measured_against_the_official_map():
     assert guards.check_against_official(0.87, None).level == "ok"
 
 
+def test_pick_top_unexcluded_ranks_by_alert_score_and_skips_excluded():
+    import natcat
+
+    low = {"event_id": 1, "alert_score": 1}
+    high = {"event_id": 2, "alert_score": 5}
+    mid = {"event_id": 3, "alert_score": 3}
+    no_score = {"event_id": 4, "alert_score": None}
+
+    assert natcat._pick_top_unexcluded([low, high, mid], frozenset())["event_id"] == 2
+    # The highest-scoring one is excluded: falls through to the next.
+    assert natcat._pick_top_unexcluded([low, high, mid], {"2"})["event_id"] == 3
+    # Every candidate excluded: nothing to return, never a stretch pick.
+    assert natcat._pick_top_unexcluded([low], {"1"}) is None
+    assert natcat._pick_top_unexcluded([], frozenset()) is None
+    # A missing/None alert_score ranks as 0, never crashes the comparison.
+    assert natcat._pick_top_unexcluded([no_score, low], frozenset())["event_id"] == 1
+
+
 if __name__ == "__main__":
     checks = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for check in checks:
