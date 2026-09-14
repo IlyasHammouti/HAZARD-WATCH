@@ -241,8 +241,11 @@ def _reported_values(verdict, clock: dict | None) -> dict:
         lines.append(f"- Area mapped as affected: "
                      f"{reported['observed_km2']:.1f} km2, typed {mechanism}")
     if reported.get("roads_km"):
+        bridges = reported.get("bridges_destroyed") or 0
+        bridge_note = (f", including {bridges} bridge"
+                       f"{'s' if bridges != 1 else ''}" if bridges else "")
         lines.append(f"- Roads: {reported['roads_destroyed_km']:.1f} km destroyed "
-                     f"of {reported['roads_km']:.1f} km graded")
+                     f"of {reported['roads_km']:.1f} km graded{bridge_note}")
     for name in (reported.get("named_destroyed") or [])[:3]:
         lines.append(f"- Destroyed and named in the product: {name}")
 
@@ -352,10 +355,12 @@ def _damage_layers(ax, crs, features: dict, extent: tuple) -> dict:
         x, y = centre["coordinates"][:2]
         if not visible(x, y):
             continue
-        # No white ring: the halo the label carries already lifts the marker
-        # off the terrain, and a second outline read as a different symbol.
+        # A white ring, back by request after seeing it on the sheet: over
+        # dark hillshade the purple loses its edge against the terrain, and
+        # the marker has to read as a symbol rather than as a dark patch.
         ax.scatter([x], [y], s=95, marker="^", c=carto.FACILITY,
-                   edgecolors="none", zorder=carto.LAYER_ORDER["facility"])
+                   edgecolors="#FFFFFF", linewidths=1.1,
+                   zorder=carto.LAYER_ORDER["facility"])
         drawn["facilities"] = drawn.get("facilities", 0) + 1
         # The triangle is the marker; the label's own dot would sit on top of
         # it and read as a second, different thing.
@@ -1292,7 +1297,8 @@ def _country_borders(point: tuple, radius_km: float = 3000.0) -> list:
 
 def draw_map(result: dict, path: Path, verdict=None, ems: dict | None = None,
              area: dict | None = None, features: dict | None = None,
-             fill_share: float = 0.80, published=None) -> Path:
+             fill_share: float = 0.80, published=None,
+             number: int | None = None) -> Path:
     """The main map for this event, in the project's visual identity.
 
     `verdict` is not optional in practice. The map is a second publication
@@ -1589,7 +1595,8 @@ def draw_map(result: dict, path: Path, verdict=None, ems: dict | None = None,
                                label=f"Buildings {grade.lower()}"))
     if drawn_layers.get("facilities"):
         keys.append(Line2D([], [], marker="^", ls="", ms=9,
-                           markeredgecolor="none", color=carto.FACILITY,
+                           markeredgecolor="#FFFFFF", markeredgewidth=1.1,
+                           color=carto.FACILITY,
                            label="Critical facility hit"))
     if drawn_layers.get("roads"):
         keys.append(Line2D([], [], ls="-", lw=2.4, color=carto.ROAD_CUT,
@@ -1603,7 +1610,12 @@ def draw_map(result: dict, path: Path, verdict=None, ems: dict | None = None,
     byline_h = carto.TYPE["byline"] / 72 * carto.DPI / carto.PORTRAIT[1]
     carto.byline_furniture(fig, ax, bottom=byline_top - byline_h)
 
+    # The number the overview gave this area. The carousel is read in order
+    # and the sheets are titled by place name, so without it a reader has to
+    # match "Phosretar" back to a dot on the first card by memory.
     where = f"{area['name']}, {event.region}" if area else event.region
+    if area and number:
+        where = f"{number}. {where}"
     when = (f"Graded {published:%d %B %Y}" if published
             else f"{event.event_date}")
     carto.header(fig, f"{where} {event.peril}",
@@ -1658,6 +1670,150 @@ def _canvas_occupancy(footprint: np.ndarray, reserved: list,
         r1 = int((1 - np.clip((fy - carto.CANVAS["bottom"]) / height, 0, 1)) * rows)
         grid[r0:r1, c0:c1] = True
     return grid
+
+
+def _overview_occupancy(ordered: list, extent: tuple, crs, reserved: list,
+                        rows: int = 260, cols: int = 220) -> np.ndarray:
+    """Where the overview sheet is already busy, for the placement solver.
+
+    The per-area sheets can hand `place_boxes` a raster of the flooded
+    footprint and be done. This sheet has no raster: it has a handful of
+    outlines that are a few pixels wide, and a label beside each. Passing an
+    empty grid told the solver the page was free everywhere, which is how a
+    bubble ended up on top of two labels and why the positions here were
+    hard-coded afterwards. This builds the grid the solver was missing.
+    """
+    grid = np.zeros((rows, cols), bool)
+    span_x = extent[2] - extent[0]
+    span_y = extent[3] - extent[1]
+    width = carto.CANVAS["right"] - carto.CANVAS["left"]
+    height = carto.CANVAS["top"] - carto.CANVAS["bottom"]
+
+    def mark(fx: float, fy: float, half_c: int = 2, half_r: int = 2):
+        """Mark a cell, and its neighbours, from a figure-fraction point."""
+        c = int((fx - carto.CANVAS["left"]) / width * cols)
+        r = int((1 - (fy - carto.CANVAS["bottom"]) / height) * rows)
+        grid[max(0, r - half_r):min(rows, r + half_r + 1),
+             max(0, c - half_c):min(cols, c + half_c + 1)] = True
+
+    for area in ordered:
+        drawn = rasterio.warp.transform_geom("EPSG:4326", crs,
+                                             mapping(area["geometry"]))
+        parts = (drawn["coordinates"] if drawn["type"] == "MultiPolygon"
+                 else [drawn["coordinates"]])
+        ring_points = []
+        for polygon in parts:
+            ring = np.array(polygon[0])
+            for x, y in ring:
+                fx, fy = (x - extent[0]) / span_x, (y - extent[1]) / span_y
+                mark(fx, fy)
+                ring_points.append((fx, fy))
+        if not ring_points:
+            continue
+        # The label sits beside the centroid and is the widest thing on the
+        # page after the areas themselves. Which side it goes on follows the
+        # same rule the drawing uses, so the reserved strip is on the side
+        # the text will actually occupy.
+        cx = float(np.mean([q[0] for q in ring_points]))
+        cy = float(np.mean([q[1] for q in ring_points]))
+        left_side = (1 - cx) < 0.22
+        for step in np.linspace(0, 0.16, 24):
+            mark(cx - step if left_side else cx + step, cy, half_r=3)
+
+    for (fx, fy), (fw, fh) in reserved:
+        c0 = int(np.clip((fx - carto.CANVAS["left"]) / width, 0, 1) * cols)
+        c1 = int(np.clip((fx + fw - carto.CANVAS["left"]) / width, 0, 1) * cols)
+        r0 = int((1 - np.clip((fy + fh - carto.CANVAS["bottom"]) / height, 0, 1)) * rows)
+        r1 = int((1 - np.clip((fy - carto.CANVAS["bottom"]) / height, 0, 1)) * rows)
+        grid[r0:r1, c0:c1] = True
+
+    return grid
+
+
+def _spot_flips(fx: float) -> bool:
+    """Whether a spot height near the right margin must label leftwards."""
+    return fx > 0.62
+
+
+def _spot_heights(ax, dem: np.ndarray, extent: tuple, occupancy: np.ndarray,
+                  taken: list) -> int:
+    """Highest, lowest and mid-altitude points, in whatever room is left.
+
+    Optional by construction. Each point is only drawn where the sheet is
+    genuinely empty there — not on an area, a place name, a bubble or the
+    furniture — so on a crowded page some or all of them are simply skipped.
+    A spot height is relief annotation: worth having when there is space for
+    it, never worth pushing anything else aside for.
+    """
+    rows, cols = occupancy.shape
+    span_x, span_y = extent[2] - extent[0], extent[3] - extent[1]
+    width = carto.CANVAS["right"] - carto.CANVAS["left"]
+    height = carto.CANVAS["top"] - carto.CANVAS["bottom"]
+
+    busy = occupancy.copy()
+    for (bx, by, bw, bh) in taken:
+        c0 = int(np.clip((bx - carto.CANVAS["left"]) / width, 0, 1) * cols)
+        c1 = int(np.clip((bx + bw - carto.CANVAS["left"]) / width, 0, 1) * cols)
+        r0 = int((1 - np.clip((by + bh - carto.CANVAS["bottom"]) / height, 0, 1)) * rows)
+        r1 = int((1 - np.clip((by - carto.CANVAS["bottom"]) / height, 0, 1)) * rows)
+        busy[r0:r1, c0:c1] = True
+
+    def free(fx: float, fy: float) -> bool:
+        """Is this figure-fraction point clear, with room for its label?
+
+        The metres sit beside the dot, so the window checked is the one the
+        text will actually occupy — to the right normally, to the left near
+        the right margin, which is also the side the label is then drawn on.
+        """
+        if not (0.08 < fx < 0.93):
+            return False
+        if not (carto.CANVAS["bottom"] + 0.03 < fy < carto.CANVAS["top"] - 0.03):
+            return False
+        c = int((fx - carto.CANVAS["left"]) / width * cols)
+        r = int((1 - (fy - carto.CANVAS["bottom"]) / height) * rows)
+        if _spot_flips(fx):
+            patch = busy[max(0, r - 6):r + 7, max(0, c - 34):c + 5]
+        else:
+            patch = busy[max(0, r - 6):r + 7, max(0, c - 4):c + 34]
+        return patch.size > 0 and not patch.any()
+
+    finite = np.isfinite(dem)
+    if finite.sum() < 100:
+        return 0
+    values = np.where(finite, dem, np.nan)
+    targets = [("high", np.nanmax(values)), ("low", np.nanmin(values)),
+               ("mid", float(np.nanmean(values)))]
+
+    drawn = 0
+    for _, target in targets:
+        # Closest pixel to the wanted altitude, then outwards through the
+        # next-closest ones until one lands somewhere there is room.
+        order = np.argsort(np.abs(values - target), axis=None)
+        for flat in order[:40000]:
+            r, c = np.unravel_index(flat, values.shape)
+            if not np.isfinite(values[r, c]):
+                continue
+            fx, fy = (c + 0.5) / values.shape[1], 1 - (r + 0.5) / values.shape[0]
+            if not free(fx, fy):
+                continue
+            x = extent[0] + fx * span_x
+            y = extent[1] + fy * span_y
+            flip = _spot_flips(fx)
+            carto.place_label(ax, x, y, f"{_thousands(values[r, c])} m",
+                              kind="spot",
+                              offset=span_x * (-0.008 if flip else 0.008),
+                              align="right" if flip else "left")
+            # Block the ground this one just took, so the next spot height
+            # does not land on its label.
+            gc = int((fx - carto.CANVAS["left"]) / width * cols)
+            gr = int((1 - (fy - carto.CANVAS["bottom"]) / height) * rows)
+            if flip:
+                busy[max(0, gr - 10):gr + 11, max(0, gc - 40):gc + 9] = True
+            else:
+                busy[max(0, gr - 10):gr + 11, max(0, gc - 8):gc + 40] = True
+            drawn += 1
+            break
+    return drawn
 
 
 def _context_labels(code: str, view: tuple):
@@ -1777,7 +1933,7 @@ def make_post(event: FloodEvent, kind: str | None = None,
 
     maps = []
     if verdict.tier > 0 or result.get("source") == "ems":
-        maps = draw_maps(result, stem, verdict, official, clock)
+        maps = draw_maps(result, stem, verdict, official, clock, record)
     map_path = maps[0] if maps else None
 
     numbers = {k: v for k, v in result.items()
@@ -1880,42 +2036,66 @@ def draw_overview(result: dict, path: Path, ordered: list, ems: dict | None = No
     # It opens the carousel, so it is the one page a reader may see alone.
     grades = (ems or {}).get("building_grades") or {}
     if grades.get("Destroyed") and (ems or {}).get("buildings"):
-        # Where the areas and their labels are, so the bubbles are placed
-        # somewhere else. An empty occupancy told `place_boxes` the page was
-        # free and it dropped a bubble on top of two of the labels.
-        # Both bubbles down the left margin, at the anchors the per-area
-        # sheets use. Automatic placement kept dropping the second one on
-        # Timure: the areas are slivers a few pixels wide, so the page reads
-        # as empty everywhere and the search has no reason to avoid them.
-        # Both high on the left. The lower slot was sitting on Bharatpur, the
-        # south-westernmost area, which is exactly where a bubble anchored to
-        # the bottom of the page lands.
-        spots = [
-            (0.035, 0.665 - carto.BUBBLE_PRIMARY_R,
-             2 * carto.BUBBLE_PRIMARY_R, 2 * carto.BUBBLE_PRIMARY_R),
-            (0.052, 0.455 - carto.BUBBLE_SECONDARY_R,
-             2 * carto.BUBBLE_SECONDARY_R, 2 * carto.BUBBLE_SECONDARY_R),
-        ]
+        cards = []
+        # Where the areas, their labels and the fixed furniture are, so the
+        # solver puts each bubble on the emptiest ground left rather than on
+        # a place name. Four cards no longer fit down one margin, which is
+        # what the hard-coded pair here used to do.
         share = grades["Destroyed"] / ems["buildings"]
-        carto.bubble(fig, backdrop,
-                     carto.slot_centre(spots[0], carto.BUBBLE_PRIMARY_R),
-                     carto.BUBBLE_PRIMARY_R,
-                     f"{share * 100:.0f}%", "Buildings destroyed",
-                     f"{_thousands(grades['Destroyed'])} of "
-                     f"{_thousands(ems['buildings'])} graded by EMS",
-                     peril=event.peril)
+        cards.append((carto.BUBBLE_PRIMARY_R,
+                      (f"{share * 100:.0f}%", "Buildings destroyed",
+                       f"{_thousands(grades['Destroyed'])} of "
+                       f"{_thousands(ems['buildings'])} graded by EMS")))
 
         tier = getattr(verdict, "tier", None)
         if tier == 1 and result.get("loss_low_usd") is not None:
-            second = (f"{_money(result['loss_low_usd'])} to "
-                      f"{_money(result['loss_high_usd'])}", "Modelled loss",
-                      f"{_money(result['exposed_usd'])} exposed")
+            cards.append((carto.BUBBLE_SECONDARY_R,
+                          (f"{_money(result['loss_low_usd'])} to "
+                           f"{_money(result['loss_high_usd'])}", "Modelled loss",
+                           f"{_money(result['exposed_usd'])} exposed")))
         else:
-            second = (f"{ems['observed_km2']:.1f} km²", "Flooded surface",
-                      f"across {len(ordered)} mapped areas")
-        carto.bubble(fig, backdrop,
-                     carto.slot_centre(spots[1], carto.BUBBLE_SECONDARY_R),
-                     carto.BUBBLE_SECONDARY_R, *second, peril=event.peril)
+            cards.append((carto.BUBBLE_SECONDARY_R,
+                          (f"{ems['observed_km2']:.1f} km²", "Flooded surface",
+                           f"across {len(ordered)} mapped areas")))
+
+        # People and lifelines. The two figures a reader asks for after the
+        # count and the cost, and the ones the per-area sheets have no room
+        # for: population is a whole-event number and a severed road matters
+        # for the valley behind it, not for the frame it happens to cross.
+        people = result.get("affected_population")
+        if people:
+            cards.append((carto.BUBBLE_TERTIARY_R,
+                          (_thousands(people), "People in the mapped area",
+                           "GHSL population grid, 2020")))
+
+        road_km = ems.get("roads_destroyed_km") or 0.0
+        if road_km:
+            bridges = ems.get("bridges_destroyed") or 0
+            note = (f"including {bridges} bridge{'s' if bridges != 1 else ''}"
+                    if bridges else
+                    f"of {ems['roads_km']:.0f} km graded")
+            cards.append((carto.BUBBLE_TERTIARY_R,
+                          (f"{road_km:.0f} km", "Road destroyed", note)))
+
+        reserved = [
+            (carto.LOCATOR_XY, carto.LOCATOR_SIZE),
+            ((0.0, 0.0), (1.0, carto.CANVAS["bottom"] + 0.02)),
+            ((0.0, carto.CANVAS["top"] - 0.02), (1.0, 0.30)),
+        ]
+        occupancy = _overview_occupancy(ordered, extent, crs, reserved)
+        spots = carto.place_boxes(occupancy,
+                                  [carto.circle_slot(r) for r, _ in cards])
+
+        for (radius, texts), spot in zip(cards, spots):
+            carto.bubble(fig, backdrop, carto.slot_centre(spot, radius),
+                         radius, *texts, peril=event.peril)
+
+        # Last, and only into what is genuinely left over: the relief's own
+        # annotation, which explains why the flood behaved as it did without
+        # taking room from anything that carries a figure.
+        _spot_heights(ax, dem, extent, occupancy,
+                      [(x, y) + carto.circle_slot(r)
+                       for (r, _), (x, y) in zip(cards, spots)])
 
     # The same furniture the per-area sheets carry. A locator without a scale
     # is the one map where a reader genuinely cannot tell forty kilometres
@@ -1960,7 +2140,8 @@ def draw_overview(result: dict, path: Path, ordered: list, ems: dict | None = No
 
 
 def draw_maps(result: dict, stem: Path, verdict=None,
-              official: dict | None = None, clock: dict | None = None) -> list:
+              official: dict | None = None, clock: dict | None = None,
+              record: dict | None = None) -> list:
     """One sheet per mapped area, in the order the responders worked.
 
     A carousel rather than a single sheet, because an activation covering four
@@ -1993,10 +2174,21 @@ def draw_maps(result: dict, stem: Path, verdict=None,
 
     ordered = sorted(areas, key=lambda a: when.get(a["name"], _dt.max))
 
+    # The overview numbers every area in this order, delivered or not. The
+    # sheets have to carry the same numbers, so they are taken from here
+    # rather than from a counter over the sheets that actually get drawn:
+    # those skip the undelivered areas and would renumber everything after
+    # the first gap.
+    numbers = {a["name"]: i for i, a in enumerate(ordered, start=1)}
+
     # Counts for the area on the sheet, not for the activation. A page headed
     # Syapru Besi carrying the whole event's 2 521 destroyed buildings invites
     # exactly the misreading the source labels exist to prevent.
-    layers = ems.vectors(code) if official else {}
+    # The caller already holds the activation record. Re-fetching it here
+    # meant a second call to the dashboard for something already in memory,
+    # and a run that had computed everything died on it when the network
+    # dropped for a moment.
+    layers = ems.vectors(code, record) if official else {}
 
     profile = result.get("profile")
     detected = result.get("detected")
@@ -2031,7 +2223,7 @@ def draw_maps(result: dict, stem: Path, verdict=None,
         paths.append(draw_map(
             result, stem / f"{code}_{index:02d}_{name}.png",
             verdict=verdict, ems=local, area=area, features=here_features,
-            published=delivered,
+            published=delivered, number=numbers.get(area["name"]),
             # Fill the canvas box the layout defines: a small lateral
             # margin, under the title, above the byline. `frame_extent`
             # already solves for that box, so 0.98 puts the outline against
@@ -2151,6 +2343,19 @@ def _digest_place(event: dict, regions: dict) -> str:
     return f"{region}, {country}" if region else country
 
 
+def _digest_row(event: dict, regions: dict) -> str:
+    """The figure's location cell, carrying the event's name where it has one.
+
+    The table groups by peril, so the heading above the row already says
+    VOLCANO and the name has nowhere else to go: the cell read "Lampung,
+    Indonesia" and Krakatau appeared nowhere on the sheet. The text names it
+    through `_digest_peril`, which the figure does not use.
+    """
+    place = _digest_place(event, regions)
+    name = _event_name(event)
+    return f"{name}, {place}" if name else place
+
+
 def _digest_dates(event: dict) -> str:
     """The start date, and never an end date.
 
@@ -2170,6 +2375,17 @@ def _digest_dates(event: dict) -> str:
     return f"since {_prose_date(start)}"
 
 
+def _red_statement(reds: list) -> str:
+    """A week with no Red alert is a fact about the week, so it is printed.
+
+    The count carries its noun: "1 reached Red." leaves the reader to guess
+    what was counted, and the sentence sits directly under two other counts.
+    """
+    if not reds:
+        return "No event reached Red."
+    return f"{len(reds)} event{'s' if len(reds) != 1 else ''} reached Red."
+
+
 def _date_span(start, finish) -> str:
     """`24 to 30 August 2026`, contracted only when the month is shared."""
     if start == finish:
@@ -2179,19 +2395,38 @@ def _date_span(start, finish) -> str:
     return f"{_prose_date(start)} to {_prose_date(finish)}"
 
 
-def _digest_peril(event: dict) -> str:
-    """Peril, carrying the storm name when the feed gives one.
+# Perils GDACS gives a real name to. It fills `eventname` for every peril, but
+# for a drought the value is an alert identifier — `Madagascar-2026`,
+# `Europe-2026` — which is a slug for the record, not the name of a thing. It
+# printed as "Madagascar-2026, Madagascar" the first time it was published to
+# the figure.
+NAMED_PERILS = ("TC", "VO")
 
-    A named cyclone is how the insurance audience indexes the event, and
-    GDACS supplies the name in its own title field.
+
+def _event_name(event: dict) -> str:
+    """The event's own name, where GDACS publishes one worth printing."""
+    if event["event_type"] not in NAMED_PERILS:
+        return ""
+    return (event.get("event_name") or "").strip()
+
+
+def _digest_peril(event: dict) -> str:
+    """Peril, carrying the name the feed gives the event.
+
+    A named cyclone is how the insurance audience indexes the event, and a
+    volcano without its name is a category rather than a place: Indonesia has
+    127 of them, so "Volcano, Indonesia" tells a reader nothing they could
+    look up. GDACS carries both in `eventname` and leaves it empty for the
+    perils it does not name, which is floods and droughts.
+
+    This used to read the cyclone name out of the title with a regular
+    expression while the volcano name sat unused one field away. Checked on
+    the same feed: `eventname` is `SAUDEL-26` for the cyclone and `Krakatau`
+    for the volcano, so one field serves both.
     """
     peril = natcat.GDACS_PERILS.get(event["event_type"], event["event_type"])
-    if event["event_type"] == "TC":
-        name = re.search(r"Tropical Cyclone\s+([A-Z][A-Z'\- ]*-\d+)",
-                         event.get("name") or "")
-        if name:
-            return f"{peril} {name.group(1).strip()}"
-    return peril
+    name = _event_name(event)
+    return f"{peril} {name}" if name else peril
 
 
 def _digest_line(event: dict, regions: dict | None = None) -> str:
@@ -2200,6 +2435,89 @@ def _digest_line(event: dict, regions: dict | None = None) -> str:
             f"{_digest_dates(event)}. Alert {event['alert_level']}.")
     fact = _digest_fact(event)
     return f"{line} {fact}." if fact else line
+
+
+def _filter_unfeatured(events: list, history: dict) -> list:
+    """Events still eligible to be headlined or listed by name this week.
+
+    A Red alert is always eligible, however long it has run or however many
+    times it has already been shown: rules section 5, a Red alert is never
+    hidden. Anything else drops out once its `event_id` has appeared, by
+    name, in a previously published digest.
+    """
+    return [e for e in events
+            if e["alert_level"] == "Red" or str(e["event_id"]) not in history]
+
+
+def _pick_headline(new: list, continuing: list, green_topups: list,
+                    history: dict) -> dict | None:
+    """The week's headline, in priority order: new, Red, this week's Green
+    top-up, then whatever else is still running.
+
+    `continuing` is the raw, unfiltered list. Without this function, the
+    only thing keeping an old continuing event from resurfacing was chance
+    of it also being the one with the most recent start date among a thin
+    set - that is exactly how a month-old flood ended up "Most recent" two
+    weeks running. Red and the Green top-ups are checked first, and a
+    suppressed continuing event is skipped as long as anything else is
+    available; it is used only as the very last resort, so a quiet week
+    with nothing else in the world never publishes an empty headline line.
+    """
+    reds = [e for e in continuing if e["alert_level"] == "Red"]
+    eligible_continuing = _filter_unfeatured(continuing, history)
+    for group in (new, reds, green_topups, eligible_continuing, continuing):
+        if group:
+            return group[0]
+    return None
+
+
+def _digest_selection(ordered: list, max_bullets: int) -> tuple:
+    """Split the week into what the text lists and what only the figure holds.
+
+    Listed: what entered the week, and whatever reached Red however long it
+    has been running. A Red alert is the one thing worth a sentence even on
+    an event the reader has seen before, because the level is what changed.
+
+    Everything else is a row in the figure's table. A drought open since last
+    November does not need a bullet repeating a line the reader can see.
+
+    A Green top-up is always listed regardless of `is_new` - it was chosen
+    specifically to represent its risk type this week, and silently folding it
+    into the figure instead would defeat the reason it was picked.
+    """
+    listed = [e for e in ordered
+              if e["is_new"] or e["alert_level"] == "Red"
+              or e.get("green_topup")][:max_bullets]
+    shown = {e["event_id"] for e in listed}
+    return listed, [e for e in ordered if e["event_id"] not in shown]
+
+
+def _digest_remainder(rest: list) -> str:
+    """One sentence for the events the figure carries and the text does not.
+
+    The bullets and the figure used to hold the same eight lines, so half the
+    post was a caption for the image beside it. The figure keeps the full week
+    because a table is what it is good at; the text keeps what entered the
+    week and what reached Red, and accounts for the rest here rather than
+    letting the reader wonder whether the list was cut.
+    """
+    if not rest:
+        return ""
+
+    counts = {}
+    for event in rest:
+        peril = natcat.GDACS_PERILS.get(event["event_type"], event["event_type"])
+        counts[peril.lower()] = counts.get(peril.lower(), 0) + 1
+
+    parts = [f"{n} {peril}{'s' if n > 1 else ''}"
+             for peril, n in sorted(counts.items(), key=lambda kv: -kv[1])]
+    listed = (parts[0] if len(parts) == 1
+              else ", ".join(parts[:-1]) + " and " + parts[-1])
+    oldest = min(e["from_date"] for e in rest).date()
+
+    return (f"The figure carries {len(rest)} more, every one of them already "
+            f"running when the week opened: {listed}. The oldest has been "
+            f"open since {_prose_date(oldest)}.")
 
 
 def _headline_sentence(event: dict | None, regions: dict | None = None) -> str:
@@ -2281,19 +2599,13 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
     # New events first, then the continuing ones, each already sorted by alert
     # level and date by `gdacs_events`.
     ordered = new + continuing
-    listed, dropped = ordered[:max_bullets], ordered[max_bullets:]
+
+    listed, dropped = _digest_selection(ordered, max_bullets)
 
     headline = (new or events or [None])[0]
     locked = locked_phrases()
 
-    overflow = ""
-    if dropped:
-        perils = sorted({natcat.GDACS_PERILS.get(e["event_type"],
-                                                 e["event_type"]).lower()
-                         for e in dropped})
-        overflow = (f"{len(dropped)} further alerts, all "
-                    f"{' and '.join(perils)}, were already running from "
-                    f"earlier months and are not listed here.")
+    overflow = _digest_remainder(dropped)
 
     unknowns = []
     if any(c.get("state") == "awaiting_pass" for c in cases):
@@ -2302,6 +2614,12 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
         "GDACS reports events of international significance, so a storm "
         "damaging a single department or county appears in no line above."
     )
+    if continuing:
+        unknowns.append(
+            "None of the running events has a published end date: the feed "
+            "advances its last day of data, which is not the day the event "
+            "stopped."
+        )
 
     plural_new = "s" if len(new) != 1 else ""
     was_were = "were" if len(continuing) != 1 else "was"
@@ -2312,8 +2630,6 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
     regions = natcat.event_regions(events)
 
     reds = [e for e in events if e["alert_level"] == "Red"]
-    red_statement = ("No event reached Red." if not reds
-                     else f"{len(reds)} reached Red.")
 
     values = {
         "WEEK_START": _prose_date(week_start),
@@ -2321,7 +2637,7 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
         "ALERT_FILTER": " or ".join(alert_levels),
         "NEW_COUNT": f"{len(new)} event{plural_new}",
         "CONTINUING_COUNT": f"{len(continuing)} {was_were}",
-        "RED_STATEMENT": red_statement,
+        "RED_STATEMENT": _red_statement(reds),
         "DIGEST_TITLE": (f"Weekly natural catastrophe report, "
                          f"{_date_span(week_start, week_end)}"),
         "HEADLINE_LINE": _headline_sentence(headline, regions),
@@ -2335,7 +2651,11 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
                         "Sentinel-1 revisit cycle over each area."
                         if cases else ""),
         "YEAR": str(week_end.year),
-        "HASHTAGS": "",          # zero is an acceptable choice, rules section 3
+        # Two, the maximum rules section 3 allows, and fixed rather than
+        # generated: they name the format and the discipline, which do not
+        # change from week to week. A tag derived from the week's perils
+        # would move every Monday and index nothing.
+        "HASHTAGS": "#natcat #catastrophemodelling",
     }
 
     body = _drop_empty_sections(fill_template(DIGEST_TEMPLATE, values))
@@ -2551,7 +2871,7 @@ def digest_figure(digest: dict, path) -> "Path":
         y -= step * 1.05
 
         for event in groups[peril]:
-            fig.text(left, y, _digest_place(event, regions),
+            fig.text(left, y, _digest_row(event, regions),
                      fontsize=carto.TYPE["place"], color=carto.THEME["text"],
                      va="top", ha="left", zorder=6)
 
