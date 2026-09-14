@@ -110,6 +110,16 @@ def test_figure_row_carries_the_name_too():
     assert report._digest_row(event(), {}) == "Nepal"
 
 
+def test_digest_line_omits_the_place_clause_when_there_is_no_place():
+    """An open-ocean cyclone has no country. `_digest_place` returns "" for
+    it, and the line must drop the clause rather than print a bare comma."""
+    cyclone = event(event_type="TC", country="", event_name="FIFTEEN-E-26",
+                    name="Tropical Cyclone FIFTEEN-E-26", alert_level="Green")
+    line = report._digest_line(cyclone, {})
+    assert ", ," not in line, line
+    assert line.startswith("- Tropical cyclone FIFTEEN-E-26, since "), line
+
+
 def test_text_lists_only_what_the_figure_cannot_carry():
     """The bullets and the figure held the same eight lines."""
     fresh = event(event_id=1, is_new=True)

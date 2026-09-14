@@ -48,8 +48,11 @@ Most recent: {{HEADLINE_LINE}}
 ## Events
 
 <!--
-Only the events the figure cannot speak for: what entered the week, and
-whatever reached Red however long it has been running. Maximum 8, ordered by
+Only the events the figure cannot speak for: what entered the week, whatever
+reached Red however long it has been running, and this week's Green top-up
+for a peril type with nothing more severe — the same mechanism GREEN_NOTE
+describes above, listed here rather than left to the figure because it is
+the only Green-level event the post names by name. Maximum 8, ordered by
 alert level then by date, new events before continuing ones.
 
 The figure carries every event of the week as a table. Listing all of them

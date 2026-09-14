@@ -2431,8 +2431,15 @@ def _digest_peril(event: dict) -> str:
 
 
 def _digest_line(event: dict, regions: dict | None = None) -> str:
+    """A Green top-up can carry no country at all: an open-ocean cyclone GDACS
+    tracks by lat/long alone, no coastline for `_digest_place` to name. Omit
+    the place clause entirely rather than print the empty string and leave a
+    bare double comma behind.
+    """
+    place = _digest_place(event, regions or {})
+    place_clause = f"{place}, " if place else ""
     line = (f"- {_digest_peril(event)}, "
-            f"{_digest_place(event, regions or {})}, "
+            f"{place_clause}"
             f"{_digest_dates(event)}. Alert {event['alert_level']}.")
     fact = _digest_fact(event)
     return f"{line} {fact}." if fact else line
