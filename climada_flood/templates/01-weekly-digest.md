@@ -29,6 +29,11 @@ RED_STATEMENT is not decoration. A week with no Red alert is a fact about the
 week, and printing it is what stops a reader assuming the filter was set to
 hide something.
 
+GREEN_NOTE names a peril type only when this week substituted its most
+severe Green-level event for a missing Orange/Red one. Empty most weeks,
+same as PENDING_LINES - nothing is said about a mechanism that was not
+used.
+
 No superlative anywhere. GDACS alert level is a classification, not a ranking
 of size (rules section 4), and "the largest" would be a superlative claim with
 no source making it (H9).
@@ -36,22 +41,28 @@ no source making it (H9).
 
 The natural catastrophes you may have missed last week, from the GDACS alert
 feed. {{NEW_COUNT}} entered the list at {{ALERT_FILTER}} level and
-{{CONTINUING_COUNT}} already running. {{RED_STATEMENT}}
+{{CONTINUING_COUNT}} already running. {{RED_STATEMENT}}{{GREEN_NOTE}}
 
 Most recent: {{HEADLINE_LINE}}
 
 ## Events
 
 <!--
-One line per event, maximum 8. Ordered by alert level then by date, new
-events before continuing ones.
+Only the events the figure cannot speak for: what entered the week, and
+whatever reached Red however long it has been running. Maximum 8, ordered by
+alert level then by date, new events before continuing ones.
+
+The figure carries every event of the week as a table. Listing all of them
+here as well made half the post a caption for the image beside it, so the
+text keeps what changed and the table keeps the record.
+
 Format is fixed: peril, country, dates, alert level, one factual clause from
-the source feed. No adjectives. No ranking language beyond the alert level.
+the source feed. The peril carries the name GDACS gives the event, which is
+how a volcano stops being "Volcano, Indonesia" and becomes a place a reader
+can look up. No adjectives. No ranking language beyond the alert level.
 Casualty counts only if quoted from a named source with a timestamp (H5).
-The block is rendered by report.weekly_digest, one line per event, because
-repeated placeholders cannot be filled with different values.
-EVENT_OVERFLOW names the events the 8-bullet cap left out, so the cap never
-silently shrinks the week.
+EVENT_OVERFLOW accounts for everything left to the figure, counted by peril
+and dated to the oldest, so the shorter list never silently shrinks the week.
 -->
 
 {{EVENT_LINES}}
@@ -98,6 +109,10 @@ Events are taken from the GDACS feed and filtered by alert level.
 One credit per line, and a blank line between them: the plain-text conversion
 unwraps consecutive lines into a paragraph, which would run the two
 attributions into one sentence.
+
+HASHTAGS closes the post with two, the maximum section 3 allows. They are
+fixed rather than generated from the week: they name the format and the
+discipline, and a tag that moved every Monday would index nothing.
 
 The Sentinel credit is filled only in a week that carries a pending case, the
 one place this format touches satellite data. Rules section 8 allows a source

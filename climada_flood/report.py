@@ -2617,13 +2617,33 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
     new = [e for e in events if e["is_new"]]
     continuing = [e for e in events if not e["is_new"]]
 
-    # New events first, then the continuing ones, each already sorted by alert
-    # level and date by `gdacs_events`.
-    ordered = new + continuing
+    # A risk type gets a Green top-up only when nothing of its own is
+    # eligible at Orange/Red this week - "eligible" excludes whatever has
+    # already been shown by name in a previous digest, Red alerts excepted.
+    history = _load_featured_history()
+    covered_types = {e["event_type"]
+                     for e in _filter_unfeatured(events, history)}
+    missing_types = [t for t in natcat.GDACS_TYPES if t not in covered_types]
+
+    green_topups = []
+    if missing_types:
+        picks = natcat.top_green_per_type(missing_types, days=7, end=week_end,
+                                          exclude_ids=set(history))
+        green_topups = [{**e, "green_topup": True} for e in picks]
+        # Most severe first, so a headline that falls through to the Green
+        # top-ups (nothing new, nothing Red) picks the single most
+        # significant one across every filled-in type, not just whichever
+        # peril happens to sort first.
+        green_topups.sort(key=lambda e: e.get("alert_score") or 0, reverse=True)
+
+    # New events first, then the continuing ones (both raw - the figure and
+    # the overflow sentence account for every event regardless of whether it
+    # is eligible to be named), then this week's Green top-ups.
+    ordered = new + continuing + green_topups
 
     listed, dropped = _digest_selection(ordered, max_bullets)
 
-    headline = (new or events or [None])[0]
+    headline = _pick_headline(new, continuing, green_topups, history)
     locked = locked_phrases()
 
     overflow = _digest_remainder(dropped)
@@ -2659,6 +2679,12 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
         "NEW_COUNT": f"{len(new)} event{plural_new}",
         "CONTINUING_COUNT": f"{len(continuing)} {was_were}",
         "RED_STATEMENT": _red_statement(reds),
+        "GREEN_NOTE": (
+            f" The list also carries the most significant Green-level event "
+            f"for {len(green_topups)} risk type"
+            f"{'s' if len(green_topups) != 1 else ''} with nothing more "
+            f"severe this week."
+        ) if green_topups else "",
         "DIGEST_TITLE": (f"Weekly natural catastrophe report, "
                          f"{_date_span(week_start, week_end)}"),
         "HEADLINE_LINE": _headline_sentence(headline, regions),
@@ -2690,6 +2716,14 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
         paths["plain_path"] = folder / f"{monday}-digest.txt"
         paths["draft_path"].write_text(body, encoding="utf-8")
         paths["plain_path"].write_text(plain, encoding="utf-8")
+
+        shown = listed + ([headline] if headline else [])
+        newly_featured = {
+            str(e["event_id"]): {"first_shown": str(monday), "name": e["name"]}
+            for e in shown
+        }
+        if newly_featured:
+            _save_featured_history({**history, **newly_featured})
 
     digest = {
         "monday": monday,
