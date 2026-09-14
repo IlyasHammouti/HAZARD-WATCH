@@ -2457,6 +2457,25 @@ def _filter_unfeatured(events: list, history: dict) -> list:
             if e["alert_level"] == "Red" or str(e["event_id"]) not in history]
 
 
+def _eligible_history(history: dict, monday) -> dict:
+    """`history`, minus this function's own picks from an earlier same-day
+    run for this same `monday`.
+
+    A same-day re-run (this project's own testing already did this more
+    than once) must not see its own earlier run's picks as "prior weeks
+    already covered" - otherwise a re-run behaves as if those events had
+    been featured in some real past week, and they stay suppressed forever.
+    Only entries this function itself wrote, tagged with
+    `generated_for_monday`, are excluded here; a manually-seeded real entry
+    has no such tag, so date equality with `monday` alone can never be
+    mistaken for "this run wrote it" - which is what let a manually-seeded
+    entry whose `first_shown` happened to equal `monday` get wrongly
+    un-suppressed.
+    """
+    return {k: v for k, v in history.items()
+            if v.get("generated_for_monday") != str(monday)}
+
+
 def _pick_headline(new: list, continuing: list, green_topups: list,
                     history: dict) -> dict | None:
     """The week's headline, in priority order: new, Red, this week's Green
@@ -2628,14 +2647,11 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
     # eligible at Orange/Red this week - "eligible" excludes whatever has
     # already been shown by name in a previous digest, Red alerts excepted.
     history = _load_featured_history()
-    # A same-day re-run (this project's own testing already did this more
-    # than once) must not see its own earlier run's picks as "prior weeks
-    # already covered": entries first shown today are excluded from the
-    # eligibility view, so a re-run behaves as if it were the first run of
-    # the day. The full `history` — untouched — is still what gets merged
-    # and saved at the end, so real prior weeks stay suppressed.
-    eligible_history = {k: v for k, v in history.items()
-                        if v.get("first_shown") != str(monday)}
+    # See `_eligible_history`: excludes only this function's own picks from
+    # an earlier same-day run for this same `monday`. The full `history` -
+    # untouched - is still what gets merged and saved at the end, so real
+    # prior weeks (and manually-seeded entries) stay suppressed.
+    eligible_history = _eligible_history(history, monday)
     covered_types = {e["event_type"]
                      for e in _filter_unfeatured(events, eligible_history)}
     missing_types = [t for t in natcat.GDACS_TYPES if t not in covered_types]
@@ -2749,7 +2765,8 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
         # own earlier pick — keeps its original `first_shown` rather than
         # having it quietly overwritten to today's date.
         newly_featured = {
-            str(e["event_id"]): {"first_shown": str(monday), "name": e["name"]}
+            str(e["event_id"]): {"first_shown": str(monday), "name": e["name"],
+                                 "generated_for_monday": str(monday)}
             for e in shown if str(e["event_id"]) not in history
         }
         if newly_featured:
