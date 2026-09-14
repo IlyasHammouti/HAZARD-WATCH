@@ -21,6 +21,9 @@ def event(**over):
         "to_date": datetime(2026, 8, 28, 1, 0),
         "is_current": True,
         "name": "Flood in Nepal",
+        "event_name": "",
+        "alert_level": "Orange",
+        "is_new": False,
         "event_id": 1,
     }
     return {**base, **over}
@@ -79,6 +82,120 @@ def test_long_country_lists_are_counted_not_listed():
     many = "Albania, Austria, Bosnia, Belgium, Bulgaria, "
     assert report._digest_country(many) == "Albania, Austria and 3 other countries"
     assert report._digest_country("Japan, China") == "Japan, China"
+
+
+def test_peril_carries_the_name_the_feed_gives():
+    """A volcano without its name is a category: Indonesia has 127."""
+    assert report._digest_peril(event()) == "Flood"
+    volcano = event(event_type="VO", country="Indonesia",
+                    event_name="Krakatau", name="Eruption  Krakatau")
+    assert report._digest_peril(volcano) == "Volcano Krakatau"
+    cyclone = event(event_type="TC", event_name="SAUDEL-26",
+                    name="Tropical Cyclone SAUDEL-26")
+    assert report._digest_peril(cyclone) == "Tropical cyclone SAUDEL-26"
+
+    # GDACS fills eventname for droughts too, with an alert slug that printed
+    # as "Madagascar-2026, Madagascar" the first time it reached the figure.
+    drought = event(event_type="DR", country="Madagascar",
+                    event_name="Madagascar-2026")
+    assert report._digest_peril(drought) == "Drought"
+    assert report._digest_row(drought, {}) == "Madagascar"
+
+
+def test_figure_row_carries_the_name_too():
+    """The table heading says VOLCANO, so the row is the only place left."""
+    volcano = event(event_type="VO", country="Indonesia", event_id=9,
+                    event_name="Krakatau")
+    assert report._digest_row(volcano, {9: "Lampung"}) ==         "Krakatau, Lampung, Indonesia"
+    assert report._digest_row(event(), {}) == "Nepal"
+
+
+def test_text_lists_only_what_the_figure_cannot_carry():
+    """The bullets and the figure held the same eight lines."""
+    fresh = event(event_id=1, is_new=True)
+    red = event(event_id=2, alert_level="Red")
+    old = event(event_id=3)
+    listed, dropped = report._digest_selection([fresh, red, old], 8)
+    assert [e["event_id"] for e in listed] == [1, 2]
+    assert [e["event_id"] for e in dropped] == [3]
+
+    # The cap still binds, and whatever it cuts moves to the figure.
+    many = [event(event_id=i, is_new=True) for i in range(10)]
+    listed, dropped = report._digest_selection(many, 8)
+    assert len(listed) == 8 and len(dropped) == 2
+
+
+def test_filter_unfeatured_drops_previously_shown_events():
+    """A Red alert is never hidden, however long it has run or repeated."""
+    history = {"3": {"first_shown": "2026-09-07", "name": "Flood in China"}}
+    fresh = event(event_id=1)
+    shown_before = event(event_id=3)
+    red_shown_before = event(event_id=3, alert_level="Red")
+    assert [e["event_id"] for e in
+            report._filter_unfeatured([fresh, shown_before], history)] == [1]
+    assert [e["event_id"] for e in
+            report._filter_unfeatured([red_shown_before], history)] == [3]
+
+
+def test_headline_prefers_new_then_red_then_green_topup_then_continuing():
+    new_event = event(event_id=1, is_new=True)
+    red = event(event_id=2, alert_level="Red")
+    topup = {**event(event_id=3, event_type="EQ"), "green_topup": True}
+    old = event(event_id=4)
+    history = {}
+
+    assert report._pick_headline([new_event], [red], [topup], history)["event_id"] == 1
+    assert report._pick_headline([], [red, old], [topup], history)["event_id"] == 2
+    assert report._pick_headline([], [old], [topup], history)["event_id"] == 3
+    assert report._pick_headline([], [old], [], history)["event_id"] == 4
+    assert report._pick_headline([], [], [], history) is None
+
+
+def test_headline_skips_a_suppressed_continuing_event_when_nothing_else_exists():
+    """The whole point: an old event shown once must not headline again,
+    even with no fresh Green pick to replace it — unless it is the only
+    event left in the world, the true last-resort safety net."""
+    history = {"9": {"first_shown": "2026-09-07", "name": "Flood in China"}}
+    suppressed = event(event_id=9)
+    assert report._pick_headline([], [suppressed], [], history) is not None
+    assert report._pick_headline([], [suppressed], [], history)["event_id"] == 9
+
+    other = event(event_id=10)
+    assert report._pick_headline(
+        [], [suppressed, other], [], history)["event_id"] == 10
+
+
+def test_digest_selection_always_lists_a_green_topup():
+    """A Green top-up must appear as a bullet even when it is not `is_new` -
+    otherwise it silently falls to the figure and the whole point (giving
+    each risk type an explicit line) is lost."""
+    continuing_topup = {**event(event_id=5, is_new=False, alert_level="Green"),
+                        "green_topup": True}
+    old = event(event_id=6)
+    listed, dropped = report._digest_selection([continuing_topup, old], 8)
+    assert [e["event_id"] for e in listed] == [5]
+    assert [e["event_id"] for e in dropped] == [6]
+
+
+def test_remainder_counts_the_perils_it_leaves_to_the_figure():
+    rest = [event(event_id=1, event_type="DR",
+                  from_date=datetime(2025, 11, 21)),
+            event(event_id=2, event_type="DR",
+                  from_date=datetime(2026, 4, 21)),
+            event(event_id=3, event_type="FL",
+                  from_date=datetime(2026, 7, 31))]
+    line = report._digest_remainder(rest)
+    assert "3 more" in line, line
+    assert "2 droughts and 1 flood" in line, line
+    assert "21 November 2025" in line, line
+    assert report._digest_remainder([]) == ""
+
+
+def test_red_statement_names_what_it_counts():
+    """A bare "1 reached Red." counts nothing the reader can see."""
+    assert report._red_statement([]) == "No event reached Red."
+    assert report._red_statement([event()]) == "1 event reached Red."
+    assert report._red_statement([event(), event()]) == "2 events reached Red."
 
 
 def test_plain_text_keeps_the_title_and_unwraps_prose():
