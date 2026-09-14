@@ -364,8 +364,22 @@ def event_regions(events: list) -> dict:
             for e in wanted
         ])
         gaul = ee.FeatureCollection("FAO/GAUL/2015/level1")
-        located = points.map(lambda f: f.set(
-            gaul.filterBounds(f.geometry()).first().toDictionary(["ADM1_NAME"])))
+
+        # A point with no intersecting polygon - Taiwan's, against this GAUL
+        # layer - leaves `.first()` a null Element, and `.toDictionary()` on
+        # a null Element throws. Unguarded, that one bad point failed the
+        # whole `.map()` and cost every other event in the batch its region,
+        # Namibia's resolvable wildfire included. Checked per feature instead,
+        # so one unmatched point loses only its own region.
+        def _with_region(feature):
+            matches = gaul.filterBounds(feature.geometry())
+            info = ee.Dictionary(ee.Algorithms.If(
+                matches.size().gt(0),
+                matches.first().toDictionary(["ADM1_NAME"]),
+                ee.Dictionary({})))
+            return feature.set(info)
+
+        located = points.map(_with_region)
         rows = located.getInfo()["features"]
     except Exception as error:                                 # noqa: BLE001
         warnings.warn(f"Region lookup failed, countries only: {error}",

@@ -2628,14 +2628,22 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
     # eligible at Orange/Red this week - "eligible" excludes whatever has
     # already been shown by name in a previous digest, Red alerts excepted.
     history = _load_featured_history()
+    # A same-day re-run (this project's own testing already did this more
+    # than once) must not see its own earlier run's picks as "prior weeks
+    # already covered": entries first shown today are excluded from the
+    # eligibility view, so a re-run behaves as if it were the first run of
+    # the day. The full `history` — untouched — is still what gets merged
+    # and saved at the end, so real prior weeks stay suppressed.
+    eligible_history = {k: v for k, v in history.items()
+                        if v.get("first_shown") != str(monday)}
     covered_types = {e["event_type"]
-                     for e in _filter_unfeatured(events, history)}
+                     for e in _filter_unfeatured(events, eligible_history)}
     missing_types = [t for t in natcat.GDACS_TYPES if t not in covered_types]
 
     green_topups = []
     if missing_types:
         picks = natcat.top_green_per_type(missing_types, days=7, end=week_end,
-                                          exclude_ids=set(history))
+                                          exclude_ids=set(eligible_history))
         green_topups = [{**e, "green_topup": True} for e in picks]
         # Most severe first, so a headline that falls through to the Green
         # top-ups (nothing new, nothing Red) picks the single most
@@ -2650,7 +2658,7 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
 
     listed, dropped = _digest_selection(ordered, max_bullets)
 
-    headline = _pick_headline(new, continuing, green_topups, history)
+    headline = _pick_headline(new, continuing, green_topups, eligible_history)
     locked = locked_phrases()
 
     overflow = _digest_remainder(dropped)
@@ -2672,12 +2680,23 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
     plural_new = "s" if len(new) != 1 else ""
     was_were = "were" if len(continuing) != 1 else "was"
 
-    # Region names, where the reported point is the event itself. Fails soft:
-    # the digest otherwise runs on plain HTTP and losing a region name is not
-    # a reason to lose the week's post.
-    regions = natcat.event_regions(events)
+    # Region names, where the reported point is the event itself. Green
+    # top-ups are included: they are exactly the EQ/WF/VO events this was
+    # built to name a region for, and `events` alone is the raw Orange/Red
+    # pull that mostly does not include them. Fails soft: the digest
+    # otherwise runs on plain HTTP and losing a region name is not a reason
+    # to lose the week's post.
+    regions = natcat.event_regions(events + green_topups)
 
     reds = [e for e in events if e["alert_level"] == "Red"]
+
+    # GDACS's own hard cap (see `gdacs_events`'s docstring) means a Green-level
+    # query is a truncated sample, not the full week: the pick is the most
+    # severe *of what came back*, not provably the most severe Green event of
+    # the week, so the note must not claim the superlative (H9). Counted
+    # against `listed`, not `green_topups`, because the bullet cap can cut a
+    # top-up before it reaches the reader.
+    shown_green = [e for e in listed if e.get("green_topup")]
 
     values = {
         "WEEK_START": _prose_date(week_start),
@@ -2687,11 +2706,11 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
         "CONTINUING_COUNT": f"{len(continuing)} {was_were}",
         "RED_STATEMENT": _red_statement(reds),
         "GREEN_NOTE": (
-            f" The list also carries the most significant Green-level event "
-            f"for {len(green_topups)} risk type"
-            f"{'s' if len(green_topups) != 1 else ''} with nothing more "
+            f" The list also carries a Green-level event "
+            f"for {len(shown_green)} risk type"
+            f"{'s' if len(shown_green) != 1 else ''} with nothing more "
             f"severe this week."
-        ) if green_topups else "",
+        ) if shown_green else "",
         "DIGEST_TITLE": (f"Weekly natural catastrophe report, "
                          f"{_date_span(week_start, week_end)}"),
         "HEADLINE_LINE": _headline_sentence(headline, regions),
@@ -2725,9 +2744,13 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
         paths["plain_path"].write_text(plain, encoding="utf-8")
 
         shown = listed + ([headline] if headline else [])
+        # Only ids never before in the full (unfiltered) history: an id
+        # already there — a Red alert shown again, or a same-day re-run's
+        # own earlier pick — keeps its original `first_shown` rather than
+        # having it quietly overwritten to today's date.
         newly_featured = {
             str(e["event_id"]): {"first_shown": str(monday), "name": e["name"]}
-            for e in shown
+            for e in shown if str(e["event_id"]) not in history
         }
         if newly_featured:
             _save_featured_history({**history, **newly_featured})
@@ -2735,7 +2758,11 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
     digest = {
         "monday": monday,
         "window": (week_start, week_end),
-        "events": events,
+        # Green top-ups included: `digest_figure`'s own contract is every
+        # event of the week, including the ones the text's bullet cap kept
+        # out, and on a quiet week the top-ups are most of what the text
+        # actually names.
+        "events": events + green_topups,
         "listed": listed,
         "dropped": dropped,
         "pending": cases,
@@ -2890,8 +2917,12 @@ def digest_figure(digest: dict, path) -> "Path":
              fontweight="bold", color=carto.THEME["faint"], va="top",
              ha="left", zorder=6)
     reds = len(digest.get("reds", []))
+    # `events` now also carries this week's Green top-ups (finding 1): counted
+    # separately here so the header keeps claiming only what is actually at
+    # Orange or Red, never folding a Green pick into that count.
+    orange_red_count = len([e for e in events if not e.get("green_topup")])
     fig.text(right, 0.872,
-             f"{len(events)} events at GDACS Orange and Red · "
+             f"{orange_red_count} events at GDACS Orange and Red · "
              + (f"{reds} at Red" if reds else "none at Red"),
              fontsize=carto.TYPE["caption"], color=carto.THEME["faint"],
              va="top", ha="right", zorder=6)

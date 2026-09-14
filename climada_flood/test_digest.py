@@ -453,6 +453,36 @@ def test_pick_top_unexcluded_ranks_by_alert_score_and_skips_excluded():
     assert natcat._pick_top_unexcluded([no_score, low], frozenset())["event_id"] == 1
 
 
+def test_weekly_digest_wires_green_topups_into_the_figure_and_accounts_for_every_event():
+    """End-to-end regression guard for the whole-branch review findings: the
+    figure's event set must carry Green top-ups too, and `listed` plus
+    `dropped` must partition every event `weekly_digest` pulled, with none
+    lost or duplicated. No per-function test could see either bug."""
+    import natcat
+
+    raw = [event(event_id=1, event_type="TC", is_new=True, alert_level="Orange"),
+           event(event_id=2, event_type="EQ", is_new=False, alert_level="Orange")]
+    topup = event(event_id=99, event_type="WF", alert_level="Green", alert_score=5)
+
+    originals = (natcat.gdacs_events, natcat.top_green_per_type, natcat.event_regions)
+    try:
+        natcat.gdacs_events = lambda **kw: raw
+        natcat.top_green_per_type = lambda types, **kw: [topup] if "WF" in types else []
+        natcat.event_regions = lambda events: {}
+        digest = report.weekly_digest(monday="2026-09-14", write=False)
+    finally:
+        natcat.gdacs_events, natcat.top_green_per_type, natcat.event_regions = originals
+
+    figure_ids = {e["event_id"] for e in digest["events"]}
+    assert 99 in figure_ids, "green top-up missing from the events the figure draws"
+
+    listed_ids = {e["event_id"] for e in digest["listed"]}
+    dropped_ids = {e["event_id"] for e in digest["dropped"]}
+    assert not (listed_ids & dropped_ids), "an event is in both listed and dropped"
+    assert listed_ids | dropped_ids == figure_ids
+    assert len(digest["listed"]) + len(digest["dropped"]) == len(digest["events"])
+
+
 def test_featured_history_round_trips_through_json():
     import tempfile
     from pathlib import Path
