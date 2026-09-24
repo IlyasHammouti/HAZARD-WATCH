@@ -778,49 +778,62 @@ def gdacs_events(
     return events
 
 
-def _pick_top_unexcluded(events: list, exclude_ids) -> dict | None:
-    """The event with the highest `alert_score`, skipping excluded ids.
+def _green_started(peril: str, start: date, end: date) -> list[dict]:
+    """Green events of one peril that began from `start` to `end`, both days in.
 
-    `alert_score` is a real field GDACS publishes on every event; nothing
-    here invents a ranking. A missing score sorts as 0 rather than raising,
-    since GDACS does not guarantee it is always present.
+    GDACS answers with at most 100 events and picks them arbitrarily. A week
+    of Green earthquakes alone is more than that (114 for 14 to 20 September
+    2026), so a window that comes back full is asked again one day at a time.
+    That makes the earthquake list whole. It cannot do the same for wildfires,
+    which run for days and overlap each other so heavily that a single day is
+    already full: their list stays a sample.
     """
-    eligible = [e for e in events if str(e["event_id"]) not in exclude_ids]
-    if not eligible:
-        return None
-    return max(eligible, key=lambda e: e.get("alert_score") or 0)
+    found = gdacs_events(days=(end - start).days, types=(peril,),
+                         alert_levels=("Green",), end=end)
+    if len(found) >= GDACS_CAP:
+        found = [e for day in range((end - start).days + 1)
+                 for e in gdacs_events(days=0, types=(peril,),
+                                       alert_levels=("Green",),
+                                       end=start + timedelta(days=day))]
+    started = {e["event_id"]: e for e in found
+               if start <= e["from_date"].date() <= end}
+    return list(started.values())
 
 
-def top_green_per_type(types: tuple, days: int = 7, end: date | None = None,
-                        exclude_ids=frozenset()) -> list:
-    """The single most severe Green-level event for each peril type.
+def _green_rank(event: dict) -> tuple:
+    """GDACS alert score, then the severity the feed reports for the peril,
+    then the later start.
 
-    One GDACS query per type in `types`, mirroring the per-type loop
-    `gdacs_events` already runs. A type with no Green event at all, or
-    whose every candidate is in `exclude_ids`, is simply absent from the
-    result - never filled with a lesser stand-in, and never raises.
-
-    Parameters
-    ----------
-    types : peril codes to fetch; typically whatever `weekly_digest` found
-        no eligible Orange/Red event for this week.
-    days, end : the same window `gdacs_events` takes.
-    exclude_ids : event ids (as strings) that must not be picked however
-        high their score - the digest's featured-event history.
-
-    Returns
-    -------
-    List of event dictionaries, same shape `gdacs_events` returns, at most
-    one per type in `types`, in the order `types` was given.
+    The first two are published fields, nothing here invents a ranking.
+    Severity is only ever compared inside one peril, where the unit is the same
+    (magnitude, wind speed in km/h, hectares). Every Green cyclone scores 1, so
+    without it the pick between them was whichever the feed listed first. A
+    flood reports none and ranks as 0, and a missing score does the same rather
+    than raising, which leaves the start date to settle between floods.
     """
-    picks = []
+    return (event.get("alert_score") or 0, float(event.get("severity") or 0),
+            event["from_date"])
+
+
+def top_green_started(n: int, start: date, end: date,
+                      types: tuple = GDACS_TYPES) -> list[dict]:
+    """The `n` Green events that began from `start` to `end`, a peril at a time.
+
+    Every peril supplies its best event before any supplies a second, so a week
+    with a hundred Green earthquakes does not fill the list with them. A peril
+    with no Green event that began in the window supplies none: a quiet peril
+    is a fact, not a gap to fill with a stretch pick.
+
+    Returns fewer than `n` when the window holds fewer, best rounds first.
+    """
+    ranked = []
     for peril in types:
-        candidates = gdacs_events(days=days, types=(peril,), end=end,
-                                   alert_levels=("Green",))
-        pick = _pick_top_unexcluded(candidates, exclude_ids)
-        if pick is not None:
-            picks.append(pick)
-    return picks
+        pool = sorted(_green_started(peril, start, end),
+                      key=_green_rank, reverse=True)
+        ranked += list(enumerate(pool))
+    # Stable: within a round the higher score goes first, then `types` order.
+    ranked.sort(key=lambda pair: (pair[0], -(pair[1].get("alert_score") or 0)))
+    return [event for _, event in ranked[:n]]
 
 
 def _gdacs_event(feature: dict, window_start: date) -> dict:

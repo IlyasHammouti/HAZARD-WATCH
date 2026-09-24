@@ -374,6 +374,14 @@ def damage_summary(layers: dict, area: str | None = None) -> dict:
         "roads_km": _length_km(roads),
         "roads_destroyed_km": _length_km(destroyed_roads),
         "road_grades": grades(roads),
+        # Bridges are inside the road layer rather than beside it, under
+        # `simplified`. They are worth pulling out: a severed bridge is what
+        # keeps a valley cut off after the water has gone, and it is counted
+        # in objects rather than in kilometres like the rest of the layer.
+        "bridges_destroyed": sum(
+            1 for f in destroyed_roads
+            if "bridge" in (f["properties"].get("simplified") or "").lower()
+        ),
         "facilities": [
             {"name": f["properties"].get("name"),
              "kind": f["properties"].get("simplified"),

@@ -23,9 +23,12 @@ The backbone. Guarantees a publication every week even when nothing major
 happens, carries no loss figure and therefore no risk of being wrong, and is
 almost fully automatable.
 
-Contents: every significant event of the week, filtered by severity. Peril,
-country, alert level, dates. Pending cases with their expected satellite pass
-dates.
+Contents: seven events that started in the week, Orange and Red first and
+Green filling the rest. Peril, country, alert level, dates. A Red alert is
+kept whatever its age. Pending cases with their expected satellite pass dates.
+
+Nothing that began before the week is listed. A drought open since last
+November was most of the list, and it was not what happened last week.
 
 ## Type 2 — Alert
 

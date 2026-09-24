@@ -2249,6 +2249,7 @@ def draw_maps(result: dict, stem: Path, verdict=None,
 
 DIGEST_TEMPLATE = "01-weekly-digest.md"
 DIGEST_MAX_BULLETS = 8          # rules section 3, bullets per list
+DIGEST_TOTAL = 7                # events in a digest, Green ones filling the gap
 
 MONTHS = ("January", "February", "March", "April", "May", "June", "July",
           "August", "September", "October", "November", "December")
@@ -2311,8 +2312,11 @@ def _digest_fact(event: dict) -> str:
     # as five million; the unit belongs to the scale, not to the number.
     if event["event_type"] == "EQ":
         clause = f"Magnitude {float(event['severity']):.1f}"
-        depth = re.search(r"Depth:\s*(\d+)\s*km", text)
-        return f"{clause}, depth {depth.group(1)} km" if depth else clause
+        # The feed gives depth to the metre (`Depth:104.329km`), and an integer
+        # pattern skipped every such quake, so only some lines carried one.
+        depth = re.search(r"Depth:\s*(\d+(?:\.\d+)?)\s*km", text)
+        return (f"{clause}, depth {float(depth.group(1)):.0f} km"
+                if depth else clause)
 
     return _tidy_units(text)
 
@@ -2351,10 +2355,14 @@ def _digest_row(event: dict, regions: dict) -> str:
     VOLCANO and the name has nowhere else to go: the cell read "Lampung,
     Indonesia" and Krakatau appeared nowhere on the sheet. The text names it
     through `_digest_peril`, which the figure does not use.
+
+    An open-ocean cyclone has a name and no country, so the cell is then the
+    name alone. `_digest_line` already drops the empty place clause; this cell
+    printed "ODALYS-26," with the comma left over.
     """
     place = _digest_place(event, regions)
     name = _event_name(event)
-    return f"{name}, {place}" if name else place
+    return f"{name}, {place}" if name and place else (name or place)
 
 
 def _digest_dates(event: dict) -> str:
@@ -2621,6 +2629,7 @@ def _save_featured_history(history: dict,
 
 def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
                   max_bullets: int = DIGEST_MAX_BULLETS,
+                  total: int = DIGEST_TOTAL,
                   write: bool = True) -> dict:
     """Build the Monday digest for the week that just ended.
 
@@ -2628,6 +2637,11 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
     so a digest published on Monday 31 August covers 24 to 30 August. Passing
     an earlier Monday rebuilds that week exactly as it stood, provided GDACS
     still serves it.
+
+    Only events that began inside the week are listed, Orange and Red first.
+    Green events that began in the week fill the list up to `total`. The one
+    exception is a Red alert, kept whatever its age: a week must never look
+    like it hid one.
     """
     from datetime import date, datetime, timedelta, timezone
 
@@ -2637,39 +2651,38 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
     week_end = monday - timedelta(days=1)
     week_start = monday - timedelta(days=7)
 
-    events = natcat.gdacs_events(days=7, alert_levels=alert_levels, end=week_end)
+    # `days` counts back from `end` with both days included, so seven days is
+    # `6`. It was `7`, which reached back to the Sunday before the week and
+    # counted an event that began there as new in two digests running.
+    events = natcat.gdacs_events(days=(week_end - week_start).days,
+                                 alert_levels=alert_levels, end=week_end)
+    events = [e for e in events if e["is_new"] or e["alert_level"] == "Red"]
     cases = natcat.pending_cases(events, end=week_end)
 
     new = [e for e in events if e["is_new"]]
-    continuing = [e for e in events if not e["is_new"]]
+    continuing = [e for e in events if not e["is_new"]]      # Red alerts only
 
-    # A risk type gets a Green top-up only when nothing of its own is
-    # eligible at Orange/Red this week - "eligible" excludes whatever has
-    # already been shown by name in a previous digest, Red alerts excepted.
     history = _load_featured_history()
     # See `_eligible_history`: excludes only this function's own picks from
     # an earlier same-day run for this same `monday`. The full `history` -
     # untouched - is still what gets merged and saved at the end, so real
     # prior weeks (and manually-seeded entries) stay suppressed.
     eligible_history = _eligible_history(history, monday)
-    covered_types = {e["event_type"]
-                     for e in _filter_unfeatured(events, eligible_history)}
-    missing_types = [t for t in natcat.GDACS_TYPES if t not in covered_types]
 
     green_topups = []
-    if missing_types:
-        picks = natcat.top_green_per_type(missing_types, days=7, end=week_end,
-                                          exclude_ids=set(eligible_history))
-        green_topups = [{**e, "green_topup": True} for e in picks]
-        # Most severe first, so a headline that falls through to the Green
-        # top-ups (nothing new, nothing Red) picks the single most
-        # significant one across every filled-in type, not just whichever
-        # peril happens to sort first.
-        green_topups.sort(key=lambda e: e.get("alert_score") or 0, reverse=True)
+    if len(events) < total:
+        picks = natcat.top_green_started(total - len(events),
+                                         week_start, week_end)
+        # Latest start first, the order the Orange/Red list is already in, so
+        # a headline that falls through to these is the most recent event.
+        # `is_new` is set outright: a pick found by a day-by-day query carries
+        # that day as its window start, which says nothing about the week.
+        green_topups = sorted(
+            ({**e, "green_topup": True, "is_new": True} for e in picks),
+            key=lambda e: e["from_date"], reverse=True)
 
-    # New events first, then the continuing ones (both raw - the figure and
-    # the overflow sentence account for every event regardless of whether it
-    # is eligible to be named), then this week's Green top-ups.
+    # New events first, then any Red alert running from before, then the
+    # Green events that fill the list.
     ordered = new + continuing + green_topups
 
     listed, dropped = _digest_selection(ordered, max_bullets)
@@ -2686,7 +2699,11 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
         "GDACS reports events of international significance, so a storm "
         "damaging a single department or county appears in no line above."
     )
-    if continuing:
+    # Whatever prints as "since" is still running in the feed. This used to key
+    # off `continuing`, which no longer holds anything but a Red alert, so the
+    # sentence would have vanished from digests whose cyclones and fires still
+    # read "since".
+    if any(_digest_dates(e).startswith("since") for e in ordered):
         unknowns.append(
             "None of the running events has a published end date: the feed "
             "advances its last day of data, which is not the day the event "
@@ -2694,7 +2711,6 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
         )
 
     plural_new = "s" if len(new) != 1 else ""
-    was_were = "were" if len(continuing) != 1 else "was"
 
     # Region names, where the reported point is the event itself. Green
     # top-ups are included: they are exactly the EQ/WF/VO events this was
@@ -2706,12 +2722,12 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
 
     reds = [e for e in events if e["alert_level"] == "Red"]
 
-    # GDACS's own hard cap (see `gdacs_events`'s docstring) means a Green-level
-    # query is a truncated sample, not the full week: the pick is the most
-    # severe *of what came back*, not provably the most severe Green event of
-    # the week, so the note must not claim the superlative (H9). Counted
-    # against `listed`, not `green_topups`, because the bullet cap can cut a
-    # top-up before it reaches the reader.
+    # GDACS's own hard cap (see `gdacs_events`'s docstring) leaves a wildfire
+    # query a truncated sample, not the full week: the pick is the highest
+    # ranked *of what came back*, not provably the largest fire of the week,
+    # so neither note may claim the superlative (H9). Counted against
+    # `listed`, not `green_topups`, because the bullet cap can cut a top-up
+    # before it reaches the reader.
     shown_green = [e for e in listed if e.get("green_topup")]
 
     values = {
@@ -2719,13 +2735,15 @@ def weekly_digest(monday=None, alert_levels: tuple = ("Orange", "Red"),
         "WEEK_END": _prose_date(week_end),
         "ALERT_FILTER": " or ".join(alert_levels),
         "NEW_COUNT": f"{len(new)} event{plural_new}",
-        "CONTINUING_COUNT": f"{len(continuing)} {was_were}",
         "RED_STATEMENT": _red_statement(reds),
         "GREEN_NOTE": (
-            f" The list also carries a Green-level event "
-            f"for {len(shown_green)} risk type"
-            f"{'s' if len(shown_green) != 1 else ''} with nothing more "
-            f"severe this week."
+            f" The list adds {len(shown_green)} Green-level "
+            f"event{'s' if len(shown_green) != 1 else ''} that started in "
+            f"the week."
+        ) if shown_green else "",
+        "GREEN_METHOD": (
+            f" Green events fill the list to {total}: one per peril first, "
+            f"ranked by GDACS alert score and then by reported severity."
         ) if shown_green else "",
         "DIGEST_TITLE": (f"Weekly natural catastrophe report, "
                          f"{_date_span(week_start, week_end)}"),
@@ -2934,13 +2952,15 @@ def digest_figure(digest: dict, path) -> "Path":
              fontweight="bold", color=carto.THEME["faint"], va="top",
              ha="left", zorder=6)
     reds = len(digest.get("reds", []))
-    # `events` now also carries this week's Green top-ups (finding 1): counted
-    # separately here so the header keeps claiming only what is actually at
-    # Orange or Red, never folding a Green pick into that count.
-    orange_red_count = len([e for e in events if not e.get("green_topup")])
+    # `events` carries the Green events that fill the week too, so the header
+    # counts each alert level rather than calling everything Orange or Red.
+    levels = [e["alert_level"] for e in events]
+    tally = " · ".join(f"{levels.count(level)} {level}"
+                       for level in ("Red", "Orange", "Green")
+                       if level in levels)
     fig.text(right, 0.872,
-             f"{orange_red_count} events at GDACS Orange and Red · "
-             + (f"{reds} at Red" if reds else "none at Red"),
+             f"{len(events)} events · {tally}"
+             + ("" if reds else " · none at Red"),
              fontsize=carto.TYPE["caption"], color=carto.THEME["faint"],
              va="top", ha="right", zorder=6)
 
@@ -3032,6 +3052,163 @@ def digest_figure(digest: dict, path) -> "Path":
         # Same locked sentence as the post body, read from the rules rather
         # than retyped, so the graphic and the text cannot drift apart.
         disclaimer=locked_phrases()["L-DISC-FEED"],
+    )
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, facecolor=carto.THEME["background"])
+    plt.close(fig)
+    return path
+
+
+# ---------------------------------------------------------------------------
+# Methodology post
+# ---------------------------------------------------------------------------
+
+METHOD_TERMS = (
+    ("HAZARD", "satellite footprint, radar and optical"),
+    ("EXPOSURE", "national asset value, mapped to a grid"),
+    ("VULNERABILITY", "a damage curve, or graded ground truth"),
+    ("LOSS", "one currency figure, published and revised"),
+)
+
+# Step, delay after the event, what happens, and whose data it is.
+METHOD_TIMELINE = (
+    ("Alert", "T+3h", "feed only,\nno figure", "GDACS"),
+    ("Activation", "T+12h", "mapping\nbegins", "Copernicus EMS"),
+    ("Extent", "T+30-45h", "first\nsatellite read", "Copernicus EMS"),
+    ("Figures", "T+45h", "damage counted\non the ground", "Copernicus EMS"),
+    ("Loss", "days later", "priced into\ncurrency", "CLIMADA"),
+    ("Update", "ongoing", "revised\nin public", "HAZARD WATCH"),
+)
+
+
+def methodology_figure(path, nepal_png=None, digest_png=None) -> "Path":
+    """The one-off methodology graphic: the identity, the clock, the output.
+
+    Static on purpose. Every value on it describes the pipeline, not an event,
+    so there is nothing to compute; the two thumbnails are the real posts it
+    produced, which is the proof the method runs end to end.
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.image as mpimg
+
+    carto.apply()
+    fig = carto.canvas(carto.PORTRAIT)
+    left, right = carto.CANVAS["left"], carto.CANVAS["right"]
+    text, faint, rule = (carto.THEME["text"], carto.THEME["faint"],
+                         carto.THEME["rule"])
+    accent = carto.PERIL_COLOURS["flood"]
+
+    def rule_at(y, x0=left, x1=right):
+        fig.lines.append(plt.Line2D([x0, x1], [y, y], transform=fig.transFigure,
+                                    color=rule, lw=0.8, zorder=5))
+
+    # ---- Header and the identity --------------------------------------------
+    carto.brand_mark(fig, xy=(right, 0.930))
+    fig.text(left, 0.930, "METHODOLOGY", fontsize=carto.TYPE["brand"],
+             fontweight="bold", color=faint, va="center", ha="left")
+    fig.text(left, 0.900, "Hazard × Exposure × Vulnerability = Loss",
+             fontsize=31, fontweight="bold", color=text, va="top", ha="left")
+    strip = ("Copernicus EMS counts the damage. CLIMADA, the open engine from "
+             "ETH Zurich, turns a hazard and a damage curve into a loss where "
+             "one applies. This pipeline decides which route fits, combines "
+             "the pieces, and publishes one figure.")
+    fig.text(left, 0.850, carto._wrap_to_margin(fig, strip, 12.5),
+             fontsize=12.5, color=faint, va="top", ha="left", linespacing=1.5)
+
+    # ---- The four terms -----------------------------------------------------
+    y = 0.765
+    rule_at(y + 0.012)
+    for term, gloss in METHOD_TERMS:
+        fig.text(left, y, term, fontsize=carto.TYPE["legend"],
+                 fontweight="bold", va="top", ha="left",
+                 color=accent if term == "LOSS" else text)
+        fig.text(left + 0.22, y, gloss, fontsize=carto.TYPE["place"] + 1,
+                 color=text, va="top", ha="left")
+        y -= 0.032
+    rule_at(y + 0.006)
+
+    # ---- Timeline -----------------------------------------------------------
+    fig.text(left, 0.612, "FROM ALERT TO LOSS", fontsize=carto.TYPE["credit"],
+             fontweight="bold", color=faint, va="top", ha="left")
+    line_y = 0.560
+    step = (right - left) / len(METHOD_TIMELINE)
+    xs = [left + step * (i + 0.5) for i in range(len(METHOD_TIMELINE))]
+    fig.lines.append(plt.Line2D([xs[0], xs[-1]], [line_y] * 2,
+                                transform=fig.transFigure, color=faint,
+                                lw=1.2, zorder=5))
+    for i, (x, (name, when, what, source)) in enumerate(
+            zip(xs, METHOD_TIMELINE)):
+        loss_step = name == "Loss"
+        dot = accent if loss_step else text
+        fig.lines.append(plt.Line2D([x], [line_y], transform=fig.transFigure,
+                                    marker="o", markersize=9 if loss_step else 7,
+                                    color=dot, markeredgecolor=carto.THEME[
+                                        "background"], markeredgewidth=1.5,
+                                    zorder=6))
+        fig.text(x, line_y + 0.016, when, fontsize=carto.TYPE["caption"],
+                 fontweight="bold", color=faint, va="bottom", ha="center")
+        fig.text(x, line_y - 0.018, name, fontsize=carto.TYPE["legend"],
+                 fontweight="bold", color=accent if loss_step else text,
+                 va="top", ha="center")
+        fig.text(x, line_y - 0.043, what, fontsize=carto.TYPE["credit"],
+                 color=text, va="top", ha="center", linespacing=1.35)
+        fig.text(x, line_y - 0.080, f"({source})", fontsize=carto.TYPE["credit"],
+                 color=faint, va="top", ha="center", style="italic")
+
+    # ---- Production ---------------------------------------------------------
+    fig.text(left, 0.428, "PRODUCTION · HAZARD WATCH",
+             fontsize=carto.TYPE["credit"], fontweight="bold", color=faint,
+             va="top", ha="left")
+    rule_at(0.405)
+
+    thumb_h = 0.215
+    thumb_w = thumb_h * carto.PORTRAIT[1] / carto.PORTRAIT[0] * 0.8
+    column = (right - left) / 2
+    cards = (
+        (nepal_png, "EVENT POST",
+         "One event, the full chain: footprint, damage counts, a modelled "
+         "loss in currency, updated as new grades land.",
+         "Run on: Rasuwa flood, Nepal, EMSR927, since 25 Aug 2026"),
+        (digest_png, "WEEKLY DIGEST",
+         "Every Monday, the week's new events from the GDACS feed. Alert "
+         "levels as published, and no loss figure.",
+         "Published weekly since 31 Aug 2026"),
+    )
+    top_y = 0.388
+    for i, (png, label, body, proof) in enumerate(cards):
+        x0 = left + i * column
+        if png:
+            ax = fig.add_axes([x0, top_y - thumb_h, thumb_w, thumb_h],
+                              zorder=6)
+            ax.imshow(mpimg.imread(str(png)))
+            ax.set_xticks([]), ax.set_yticks([])
+            for spine in ax.spines.values():
+                spine.set_edgecolor(rule)
+                spine.set_linewidth(1.0)
+        tx = x0 + thumb_w + 0.022
+        width = column - thumb_w - 0.04
+        fig.text(tx, top_y, label, fontsize=carto.TYPE["legend"],
+                 fontweight="bold", color=text, va="top", ha="left")
+        fig.text(tx, top_y - 0.030,
+                 carto._wrap_to_margin(fig, body, carto.TYPE["credit"],
+                                       left=tx, right=tx + width),
+                 fontsize=carto.TYPE["credit"], color=text, va="top",
+                 ha="left", linespacing=1.45)
+        fig.text(tx, top_y - thumb_h,
+                 carto._wrap_to_margin(fig, proof, carto.TYPE["credit"],
+                                       left=tx, right=tx + width),
+                 fontsize=carto.TYPE["credit"], fontweight="bold",
+                 color=accent if i == 0 else faint, va="bottom", ha="left",
+                 linespacing=1.4)
+
+    carto.footer(
+        fig,
+        "Sources: GDACS (European Commission, United Nations) · Copernicus "
+        "EMS Rapid Mapping · CLIMADA (ETH Zurich)",
+        byline="Ilyas Hammouti",
+        disclaimer=locked_phrases()["L-DISC-SHORT"],
     )
 
     path = Path(path)

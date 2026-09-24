@@ -14,6 +14,7 @@ Run:  python build_brand.py
 
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
+import numpy as np
 
 OUT = Path(__file__).parent
 
@@ -134,18 +135,50 @@ def union(*boxes):
 
 
 # ------------------------------------------------------------ decorations
+def stem_width(f):
+    """Measured stroke width of the font at this size, from the stems of an H.
+
+    The ticks are set to this, so the frame carries the same visual weight as
+    the lettering it frames whatever the size. Bahnschrift at weight 600 runs
+    at roughly 0.165 of its cap height, but it is measured rather than assumed
+    because the variable axes move it.
+    """
+    b = _SCRATCH.textbbox((0, 0), "H", font=f, anchor="ls")
+    w, h = int(b[2] - b[0]) + 8, int(b[3] - b[1]) + 8
+    im = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(im).text((4 - b[0], 4 - b[1]), "H", font=f, fill=255, anchor="ls")
+    row = im.crop((0, int(h * 0.18), w, int(h * 0.18) + 1)).point(lambda v: 1 if v > 127 else 0)
+    return max(1, int(round(sum(row.getdata()) / 2.0)))   # two stems on that scanline
+
+
+def _bar(d, cx, cy, dx, dy, w, h, fill):
+    """Rectangle whose outer corner is exactly the pixel (cx, cy).
+
+    Ticks are drawn as bars rather than thick lines: PIL centres a wide line
+    on its path and rounds unevenly for even widths, which is what pushed the
+    strokes past the frame on some corners and not others.
+    """
+    x0 = cx if dx > 0 else cx - w + 1
+    y0 = cy if dy > 0 else cy - h + 1
+    x0, y0 = int(round(x0)), int(round(y0))
+    d.rectangle([x0, y0, x0 + int(w) - 1, y0 + int(h) - 1], fill=fill)
+
+
 def corner_ticks(d, box, length, weight, fill):
     """Area-of-interest frame: four corner marks, never a closed rectangle."""
-    x0, y0, x1, y1 = box
+    x0, y0, x1, y1 = (int(round(v)) for v in box)
+    length, weight = int(round(length)), int(round(weight))
     for cx, cy, dx, dy in ((x0, y0, 1, 1), (x1, y0, -1, 1), (x0, y1, 1, -1), (x1, y1, -1, -1)):
-        d.line([(cx, cy), (cx + dx * length, cy)], fill=fill, width=weight)
-        d.line([(cx, cy), (cx, cy + dy * length)], fill=fill, width=weight)
+        _bar(d, cx, cy, dx, dy, length, weight, fill)   # arm along x
+        _bar(d, cx, cy, dx, dy, weight, length, fill)   # arm along y
 
 
-def frame(d, ink_box, pad, length, weight, fill):
-    """Corner ticks at an equal distance from the type on all four sides."""
+def frame(d, ink_box, pad, f, fill, length_ratio=3.2):
+    """Corner ticks at an equal distance from the type, weighted like the type."""
+    weight = stem_width(f)
     x0, y0, x1, y1 = ink_box
-    corner_ticks(d, (x0 - pad, y0 - pad, x1 + pad, y1 + pad), length, weight, fill)
+    corner_ticks(d, (x0 - pad, y0 - pad, x1 + pad, y1 + pad),
+                 weight * length_ratio, weight, fill)
 
 
 def graticule(d, size, step, fill):
@@ -184,7 +217,7 @@ def logo_avatar(s=1, dark=True):
 
     b1 = tracked(d, (cx, y0), "HAZARD", f, c["fg"], t1, anchor="m")
     b2 = tracked(d, (cx, y0 + leading), "WATCH", f, c["fg"], t2, anchor="m")
-    frame(d, union(b1, b2), pad, 30 * s, max(1, int(3 * s)), c["fg"])
+    frame(d, union(b1, b2), pad, f, c["fg"])
     return im
 
 
@@ -204,7 +237,7 @@ def logo_monogram(s=1, dark=True):
     y0 = (S - (m[3] - m[1] + 2 * pad)) / 2 - m[1] + pad
 
     b = tracked(d, (S / 2, y0), "HW", f, c["fg"], t, anchor="m")
-    frame(d, b, pad, 44 * s, max(1, int(4 * s)), c["fg"])
+    frame(d, b, pad, f, c["fg"])
     return im
 
 
@@ -232,7 +265,7 @@ def logo_horizontal(s=1, dark=True):
 
     b1 = tracked(d, (cx, y0), WORDMARK, f, c["fg"], t, anchor="m")
     b2 = tracked(d, (cx, y0 + leading), sub, m, c["sec"], tsub, anchor="m")
-    frame(d, union(b1, b2), pad, 46 * s, max(1, int(4 * s)), c["fg"])
+    frame(d, union(b1, b2), pad, f, c["fg"])
     return im
 
 
@@ -341,6 +374,22 @@ def demo():
     print("demo: layout and framing checks passed")
 
 
+def to_transparent(im, dark):
+    """Convert RGB image to RGBA, making the background transparent."""
+    rgba = im.convert("RGBA")
+    arr = np.array(rgba)
+    # Get brightness of each pixel
+    brightness = np.mean(arr[:,:,:3], axis=2).astype(np.uint8)
+    if dark:
+        # Dark bg: make dark pixels (bg) transparent
+        alpha = brightness
+    else:
+        # Light bg: make light pixels (bg) transparent
+        alpha = 255 - brightness
+    arr[:,:,3] = alpha
+    return Image.fromarray(arr, "RGBA")
+
+
 def main():
     jobs = []
     for tag, dark in (("ink", True), ("paper", False)):
@@ -353,9 +402,20 @@ def main():
             ("linkedin-profile-banner-%s-1584x396.png" % tag, profile_banner(1, dark)),
             ("linkedin-profile-banner-%s-3168x792.png" % tag, profile_banner(2, dark)),
         ]
+
+    # Transparent versions of logos only
+    for tag, dark in (("ink", True), ("paper", False)):
+        for build_func, build_name in [(logo_avatar, "avatar"),
+                                        (logo_monogram, "monogram"),
+                                        (logo_horizontal, "horizontal")]:
+            im = build_func(1, dark)
+            transparent = to_transparent(im, dark)
+            name = "logo-%s-%s-transparent.png" % (build_name, tag)
+            transparent.save(OUT / name)
+            jobs.append((name, transparent))
+
     for name, im in jobs:
-        im.save(OUT / name)
-        print("%-44s %d x %d" % (name, im.size[0], im.size[1]))
+        print("%-50s %d x %d" % (name, im.size[0], im.size[1]))
     demo()
 
 

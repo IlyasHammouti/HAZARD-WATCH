@@ -45,6 +45,11 @@ def test_earthquake_magnitude_is_not_millions():
                                      severity_text="Magnitude 5M, Depth:10km"))
     assert fact == "Magnitude 5.0, depth 10 km", fact
 
+    # The feed gives depth to the metre, and a decimal used to hide it.
+    fact = report._digest_fact(event(event_type="EQ", severity="6.4",
+                                     severity_text="Magnitude 6.4M, Depth:104.329km"))
+    assert fact == "Magnitude 6.4, depth 104 km", fact
+
 
 def test_alert_level_is_not_repeated_inside_the_clause():
     fact = report._digest_fact(event(
@@ -108,6 +113,10 @@ def test_figure_row_carries_the_name_too():
                     event_name="Krakatau")
     assert report._digest_row(volcano, {9: "Lampung"}) ==         "Krakatau, Lampung, Indonesia"
     assert report._digest_row(event(), {}) == "Nepal"
+
+    # A named cyclone over open water has no country: no dangling comma.
+    cyclone = event(event_type="TC", country="", event_name="ODALYS-26")
+    assert report._digest_row(cyclone, {}) == "ODALYS-26"
 
 
 def test_digest_line_omits_the_place_clause_when_there_is_no_place():
@@ -435,52 +444,90 @@ def test_own_detection_is_measured_against_the_official_map():
     assert guards.check_against_official(0.87, None).level == "ok"
 
 
-def test_pick_top_unexcluded_ranks_by_alert_score_and_skips_excluded():
+def test_top_green_started_takes_each_peril_before_repeating():
+    """A hundred Green earthquakes must not crowd out the other perils."""
+    from datetime import date
+
     import natcat
 
-    low = {"event_id": 1, "alert_score": 1}
-    high = {"event_id": 2, "alert_score": 5}
-    mid = {"event_id": 3, "alert_score": 3}
-    no_score = {"event_id": 4, "alert_score": None}
+    def green(event_id, peril, severity, day, score=1):
+        return event(event_id=event_id, event_type=peril, alert_level="Green",
+                     alert_score=score, severity=severity,
+                     from_date=datetime(2026, 9, day, 12))
 
-    assert natcat._pick_top_unexcluded([low, high, mid], frozenset())["event_id"] == 2
-    # The highest-scoring one is excluded: falls through to the next.
-    assert natcat._pick_top_unexcluded([low, high, mid], {"2"})["event_id"] == 3
-    # Every candidate excluded: nothing to return, never a stretch pick.
-    assert natcat._pick_top_unexcluded([low], {"1"}) is None
-    assert natcat._pick_top_unexcluded([], frozenset()) is None
-    # A missing/None alert_score ranks as 0, never crashes the comparison.
-    assert natcat._pick_top_unexcluded([no_score, low], frozenset())["event_id"] == 1
+    pools = {
+        "EQ": [green(1, "EQ", 5.1, 15), green(2, "EQ", 6.5, 17),
+               green(3, "EQ", 6.4, 20), green(8, "EQ", 5.0, 16, score=2)],
+        # Every Green cyclone scores 1, so wind speed decides between them.
+        "TC": [green(4, "TC", 130.0, 20), green(5, "TC", 139.0, 15)],
+        # A flood reports no severity: the later start decides.
+        "FL": [green(6, "FL", 0.0, 16), green(7, "FL", 0.0, 18)],
+        "WF": [],
+    }
+    original = natcat._green_started
+    natcat._green_started = lambda peril, start, end: pools.get(peril, [])
+    try:
+        window = (date(2026, 9, 14), date(2026, 9, 20))
+        # Score first (id 8), then each peril's best, then a second round.
+        picks = [e["event_id"] for e in natcat.top_green_started(4, *window)]
+        assert picks == [8, 5, 7, 2], picks
+
+        # A window holding fewer than asked for returns them all, no padding.
+        assert len(natcat.top_green_started(20, *window)) == 8
+    finally:
+        natcat._green_started = original
 
 
-def test_weekly_digest_wires_green_topups_into_the_figure_and_accounts_for_every_event():
-    """End-to-end regression guard for the whole-branch review findings: the
-    figure's event set must carry Green top-ups too, and `listed` plus
-    `dropped` must partition every event `weekly_digest` pulled, with none
-    lost or duplicated. No per-function test could see either bug."""
+def test_weekly_digest_keeps_only_the_week_and_fills_it_with_green():
+    """End-to-end regression guard. The figure's event set must carry the
+    Green events, and `listed` plus `dropped` must partition every event
+    `weekly_digest` pulled, with none lost or duplicated. And what began
+    before the week is out, apart from a Red alert: a flood running since
+    July was most of the list."""
+    from datetime import date
+
     import natcat
 
     raw = [event(event_id=1, event_type="TC", is_new=True, alert_level="Orange"),
-           event(event_id=2, event_type="EQ", is_new=False, alert_level="Orange")]
-    topup = event(event_id=99, event_type="WF", alert_level="Green", alert_score=5)
+           event(event_id=2, event_type="EQ", is_new=False, alert_level="Orange"),
+           event(event_id=3, event_type="DR", is_new=False, alert_level="Red")]
+    fill = [event(event_id=99, event_type="WF", alert_level="Green", alert_score=5),
+            event(event_id=98, event_type="EQ", alert_level="Green", alert_score=1)]
+    asked = {}
 
-    originals = (natcat.gdacs_events, natcat.top_green_per_type, natcat.event_regions)
+    def gdacs_events(**kw):
+        asked["days"] = kw["days"]
+        return raw
+
+    def top_green_started(n, start, end, **kw):
+        asked["fill"] = (n, start, end)
+        return fill
+
+    originals = (natcat.gdacs_events, natcat.top_green_started, natcat.event_regions)
     try:
-        natcat.gdacs_events = lambda **kw: raw
-        natcat.top_green_per_type = lambda types, **kw: [topup] if "WF" in types else []
+        natcat.gdacs_events = gdacs_events
+        natcat.top_green_started = top_green_started
         natcat.event_regions = lambda events: {}
         digest = report.weekly_digest(monday="2026-09-14", write=False)
     finally:
-        natcat.gdacs_events, natcat.top_green_per_type, natcat.event_regions = originals
+        natcat.gdacs_events, natcat.top_green_started, natcat.event_regions = originals
+
+    # Seven days is `days=6`: both ends count, and 7 reached into the Sunday
+    # before the week.
+    assert asked["days"] == 6, asked
+    # The list is topped up to the total from what Orange and Red left.
+    assert asked["fill"] == (report.DIGEST_TOTAL - 2, date(2026, 9, 7),
+                             date(2026, 9, 13)), asked
 
     figure_ids = {e["event_id"] for e in digest["events"]}
-    assert 99 in figure_ids, "green top-up missing from the events the figure draws"
+    assert figure_ids == {1, 3, 98, 99}, figure_ids    # 2 began before the week
 
     listed_ids = {e["event_id"] for e in digest["listed"]}
     dropped_ids = {e["event_id"] for e in digest["dropped"]}
     assert not (listed_ids & dropped_ids), "an event is in both listed and dropped"
     assert listed_ids | dropped_ids == figure_ids
     assert len(digest["listed"]) + len(digest["dropped"]) == len(digest["events"])
+    assert "adds 2 Green-level events" in digest["plain"], digest["plain"]
 
 
 def test_featured_history_round_trips_through_json():

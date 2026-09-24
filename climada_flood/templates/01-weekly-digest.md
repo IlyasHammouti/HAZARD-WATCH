@@ -18,21 +18,22 @@ the draft is converted to plain text before publishing (section 3.1).
 The title names the format and the week, because "Natural catastrophes" alone
 says neither. It stays in the published text and it also prints on the figure.
 
-Opening. One framing sentence, then the counts, then the most recent event.
+Opening. One framing sentence, then the count, then the most recent event.
 
-Two counts, not one. The GDACS window filters on overlap, so a drought that
-began last November is returned in this week's list. "N events this week" over
-a list where most of them started months ago is a false statement, and it is
-the first thing this template got wrong.
+Only events that started in the week are counted or listed. The GDACS window
+filters on overlap, so a drought that began last November is returned in this
+week's list, and "N events this week" over a list where most of them started
+months ago is a false statement, the first thing this template got wrong.
+Red is the one exception, kept whatever its age.
 
 RED_STATEMENT is not decoration. A week with no Red alert is a fact about the
 week, and printing it is what stops a reader assuming the filter was set to
 hide something.
 
-GREEN_NOTE names a peril type only when this week substituted its most
-severe Green-level event for a missing Orange/Red one. Empty most weeks,
-same as PENDING_LINES - nothing is said about a mechanism that was not
-used.
+GREEN_NOTE says how many Green-level events fill the list up to the weekly
+total. It is what stops a reader taking a list of Green events for a list of
+alerts. Empty when Orange and Red alone reach the total, same as
+PENDING_LINES - nothing is said about a mechanism that was not used.
 
 No superlative anywhere. GDACS alert level is a classification, not a ranking
 of size (rules section 4), and "the largest" would be a superlative claim with
@@ -40,32 +41,32 @@ no source making it (H9).
 -->
 
 The natural catastrophes you may have missed last week, from the GDACS alert
-feed. {{NEW_COUNT}} entered the list at {{ALERT_FILTER}} level and
-{{CONTINUING_COUNT}} already running. {{RED_STATEMENT}}{{GREEN_NOTE}}
+feed. {{NEW_COUNT}} entered the list at {{ALERT_FILTER}} level.
+{{RED_STATEMENT}}{{GREEN_NOTE}}
 
 Most recent: {{HEADLINE_LINE}}
 
 ## Events
 
 <!--
-Only the events the figure cannot speak for: what entered the week, whatever
-reached Red however long it has been running, and this week's Green top-up
-for a peril type with nothing more severe — the same mechanism GREEN_NOTE
-describes above, listed here rather than left to the figure because it is
-the only Green-level event the post names by name. Maximum 8, ordered by
-alert level then by date, new events before continuing ones.
+Every event of the week: what started in it, at Orange or Red first, then the
+Green-level events that fill the list up to the weekly total (GREEN_NOTE, above),
+plus any Red alert running from before. Maximum 8, ordered by alert level then
+by date, most recent first.
 
-The figure carries every event of the week as a table. Listing all of them
-here as well made half the post a caption for the image beside it, so the
-text keeps what changed and the table keeps the record.
+The figure carries the same events as a table, grouped by peril. That is
+the whole week now that nothing older is listed, so the two no longer differ.
+They used to: the text kept what changed and the table kept the running
+events, because listing them all in both made half the post a caption for the
+image beside it.
 
 Format is fixed: peril, country, dates, alert level, one factual clause from
 the source feed. The peril carries the name GDACS gives the event, which is
 how a volcano stops being "Volcano, Indonesia" and becomes a place a reader
 can look up. No adjectives. No ranking language beyond the alert level.
 Casualty counts only if quoted from a named source with a timestamp (H5).
-EVENT_OVERFLOW accounts for everything left to the figure, counted by peril
-and dated to the oldest, so the shorter list never silently shrinks the week.
+EVENT_OVERFLOW accounts for anything past the eight bullets, left to the
+figure, so a longer list never silently shrinks the week.
 -->
 
 {{EVENT_LINES}}
@@ -101,7 +102,8 @@ No loss figure appears in this type, so no tier statement is needed unless the
 post carries exposure numbers, in which case use L-TIER-2 or L-TIER-3.
 -->
 
-Events are taken from the GDACS feed and filtered by alert level.
+Events are taken from the GDACS feed and filtered by alert level. Only those
+that started in the week are kept, except Red alerts.{{GREEN_METHOD}}
 {{PASS_METHOD}}
 
 {{LOCKED:L-METHOD}}

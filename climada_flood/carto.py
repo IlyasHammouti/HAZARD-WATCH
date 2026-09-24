@@ -50,7 +50,13 @@ BRAND = "HAZARD WATCH"
 # The image lockup that replaces the text wordmark in the top-right corner.
 # Lives one level up from this repository, alongside the other brand assets
 # that are shared across more than one project.
-BRAND_MARK = Path(__file__).resolve().parent.parent / "brand" / "logo-avatar-paper.png"
+# The paper variant, not the ink one. In `brand/build_brand.py` "ink" names
+# the dark-background build, and its transparent export keeps the pale marks
+# and drops the dark ground — so on this project's paper-coloured page it
+# renders as near-white on near-white. The paper build is the same lockup
+# with the ink opaque, which is what a light page needs.
+BRAND_MARK = (Path(__file__).resolve().parent.parent / "brand"
+              / "logo-avatar-paper-transparent.png")
 
 # ---------------------------------------------------------------------------
 # Colour
@@ -280,6 +286,10 @@ LABEL_STYLES = {
                 "colour": "#4A5158", "ha": "center", "italic": "normal"},
     "water": {"size": TYPE["subtitle"], "weight": "normal", "dot": 0,
               "colour": "#3E6E8E", "ha": "center", "italic": "italic"},
+    # Spot heights: smaller and lighter than a place name. They are the
+    # relief's own annotation, and a reader should be able to ignore them.
+    "spot": {"size": TYPE["subtitle"] - 2, "weight": "normal", "dot": 3.5,
+             "colour": "#4A5158", "ha": "left", "italic": "normal"},
 }
 # ---------------------------------------------------------------------------
 # Basemap
@@ -656,6 +666,20 @@ def _axes_pixels(ax) -> tuple:
     return box.width * PORTRAIT[0], box.height * PORTRAIT[1]
 
 
+def north_width(ax, height: float) -> float:
+    """Width the north mark will occupy, in this axes' x units.
+
+    The glyph keeps its own proportions, so its width depends on the axes'
+    pixel aspect and cannot be assumed. Anything that has to sit beside it
+    without touching it needs this number before either is drawn.
+    """
+    pts = np.array(_NORTH_PATH, dtype=float)
+    span_x = pts[:, 0].max() - pts[:, 0].min()
+    span_y = pts[:, 1].max() - pts[:, 1].min()
+    ax_w_px, ax_h_px = _axes_pixels(ax)
+    return (height * ax_h_px) * (span_x / span_y) / ax_w_px
+
+
 def north_glyph(ax, centre=(0.86, 0.50), height: float = 0.72,
                 colour: str = FURNITURE_INK):
     """The project's north mark, drawn from its SVG outline.
@@ -687,7 +711,8 @@ def north_glyph(ax, centre=(0.86, 0.50), height: float = 0.72,
 
 def scale_glyph(ax, length_km: float, centre_y: float = 0.5,
                 left: float = 0.06, right: float = 0.70,
-                colour: str = FURNITURE_INK, box_width: float = None):
+                colour: str = FURNITURE_INK, box_width: float = None,
+                anchor_right: float = None):
     """The project's scale bar: value, hollow box, unit.
 
     `box_width` is the width the bar must have, in this axes' coordinates, for
@@ -704,6 +729,17 @@ def scale_glyph(ax, length_km: float, centre_y: float = 0.5,
     gap = 10 / ax_w_px               # a constant 10 px either side of the box
     label_w = (len(f"{length_km:g}") * 9 + 6) / ax_w_px
     unit_w = 30 / ax_w_px
+
+    # `anchor_right` fixes the bar's right edge instead of its left one. The
+    # north mark is at a fixed place on the page and the bar is not: its
+    # length is whatever the map's own scale makes it, and its label is one
+    # to four digits wide. Anchoring the left edge therefore leaves a gap to
+    # the north mark that changes with every sheet. Anchoring the right edge
+    # keeps that gap constant and lets the bar grow leftwards, where there is
+    # nothing to collide with.
+    if anchor_right is not None:
+        total = label_w + gap + (box_width or 0.0) + gap + unit_w
+        left = anchor_right - total
 
     box_x0 = left + label_w + gap
     box_x1 = (box_x0 + box_width) if box_width else (right - unit_w - gap)
@@ -809,19 +845,22 @@ def byline_furniture(fig, ax_map, bottom: float, right: float = 0.94,
     # this did before, prints a number the box does not represent.
     xmin, xmax = ax_map.get_xlim()
     span_km = abs(xmax - xmin) / 1000
-    # Room the box may take, leaving the unit label clear of the north
-    # mark. A correctly-sized bar is longer than the old decorative one,
-    # and the first honest render pushed "Km" into the N.
-    room = 0.46
+    # Room the box may take. The bar is right-anchored against the north
+    # mark now, so this is only a ceiling on the box itself, stopping a very
+    # zoomed-out sheet from running the bar off the left of the furniture.
+    room = 0.52
 
     nice = [1, 2, 5, 10, 20, 25, 50, 100, 200, 500, 1000]
     fits = [v for v in nice if (v / span_km) / width <= room]
     total = max(fits) if fits else min(nice)
     box_width = (total / span_km) / width
 
-    scale_glyph(ax, total, centre_y=0.42, left=0.02, right=0.72,
-                box_width=box_width)
-    north_glyph(ax, centre=(0.90, 0.50), height=0.94)
+    # The north mark is the fixed element; the bar is measured against it.
+    north_centre, north_h = 0.90, 0.94
+    north_left = north_centre - north_width(ax, north_h) / 2
+    scale_glyph(ax, total, centre_y=0.42, box_width=box_width,
+                anchor_right=north_left - 16 / (width * PORTRAIT[0]))
+    north_glyph(ax, centre=(north_centre, 0.50), height=north_h)
     return ax, total
 
 
@@ -972,6 +1011,10 @@ def place_boxes(information: np.ndarray, sizes: list) -> list:
 
 BUBBLE_PRIMARY_R = 0.115
 BUBBLE_SECONDARY_R = 0.095
+# A third size, for the cards that support the headline rather than carry it.
+# Four bubbles at the first two sizes leave the overview with more glass on
+# it than terrain.
+BUBBLE_TERTIARY_R = 0.083
 LOCATOR_SIZE = (0.165, 0.132)
 LOCATOR_XY = (0.775, 0.756)      # top edge aligned with the title
 PANEL_XY = (0.655, 0.192)        # bottom right, constant
@@ -1046,9 +1089,23 @@ def _brand_mark_crop():
     import numpy as _np
     from PIL import Image as _Image
 
-    img = _np.asarray(_Image.open(BRAND_MARK).convert("RGB"))
-    background = img[0, 0].astype(int)
-    ink = (_np.abs(img.astype(int) - background).sum(axis=2)) > 18
+    source = _Image.open(BRAND_MARK).convert("RGBA")
+    rgba = _np.asarray(source).astype(float) / 255.0
+    alpha = rgba[..., 3]
+
+    # The mark is transparent PNG, and the ink in it is dark. Flattening onto
+    # a black canvas, which is what `convert("RGB")` does, makes dark ink and
+    # empty background the same colour and the crop below finds nothing to
+    # crop to. Composite onto the page colour instead, and take the alpha
+    # channel as the definition of ink: it is the file's own answer to the
+    # question the old colour-distance test was guessing at.
+    import matplotlib.colors as _mcolors
+    page = _np.array(_mcolors.to_rgb(THEME["background"]), dtype=float)
+    img = (rgba[..., :3] * alpha[..., None]
+           + page * (1 - alpha[..., None]))
+    img = (img * 255).round().astype("uint8")
+
+    ink = alpha > 0.06
     rows, cols = _np.where(ink)
     if rows.size == 0:
         _brand_mark_cache = img
@@ -1061,7 +1118,8 @@ def _brand_mark_crop():
     return _brand_mark_cache
 
 
-def brand_mark(fig, xy=(0.94, 0.929), height: float = 0.058):
+def brand_mark(fig, xy=(0.94, 0.929), height: float = 0.058,
+               centre_x: float = None):
     """The wordmark image, anchored top-right at its own aspect ratio.
 
     `xy` is the mark's right edge and vertical centre, in figure fraction —
@@ -1076,7 +1134,13 @@ def brand_mark(fig, xy=(0.94, 0.929), height: float = 0.058):
     width_px = height_px * (crop_w / crop_h)
     width = width_px / PORTRAIT[0]
 
-    ax = fig.add_axes([xy[0] - width, xy[1] - height / 2, width, height],
+    # `centre_x` centres the mark on a given column instead of hanging it from
+    # a right edge. The width is only known here, after the crop, so a caller
+    # that wants the mark centred on something else on the page cannot
+    # compute the right edge itself.
+    left = (centre_x - width / 2) if centre_x is not None else (xy[0] - width)
+
+    ax = fig.add_axes([left, xy[1] - height / 2, width, height],
                       zorder=6)
     ax.imshow(crop)
     ax.axis("off")
@@ -1090,7 +1154,14 @@ def header(fig, title: str, subtitle: str = "", peril: str = "flood"):
     if subtitle:
         fig.text(0.06, 0.846, subtitle, fontsize=TYPE["subtitle"],
                  color=THEME["muted"], va="top", ha="left", zorder=6)
-    brand_mark(fig)
+    # Centred on the locator disc rather than hung off the right margin. The
+    # two are the only things in the top right corner, and a mark whose
+    # centre does not line up with the circle under it reads as a mistake
+    # even to someone who could not say which of the two is off.
+    # Sized so the lockup's width matches the disc's diameter, which is what
+    # makes the two read as one column rather than as a small mark that
+    # happens to sit above a big circle.
+    brand_mark(fig, centre_x=LOCATOR_XY[0] + LOCATOR_SIZE[0] / 2, height=0.070)
     return fig
 
 

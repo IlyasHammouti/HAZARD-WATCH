@@ -365,6 +365,9 @@ def reported_facts(ems: dict | None, timings: dict | None = None) -> dict:
         if ems.get("roads_km"):
             facts["roads_km"] = ems["roads_km"]
             facts["roads_destroyed_km"] = ems.get("roads_destroyed_km", 0.0)
+            # Counted separately from the kilometres, because a severed
+            # bridge is what keeps a valley cut off after the water is gone.
+            facts["bridges_destroyed"] = ems.get("bridges_destroyed") or 0
         if ems.get("named_destroyed"):
             facts["named_destroyed"] = ems["named_destroyed"]
         facts["source"] = "Copernicus EMS Rapid Mapping"
