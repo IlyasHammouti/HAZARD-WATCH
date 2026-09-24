@@ -1,73 +1,47 @@
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-env/
+.ipynb_checkpoints/
+.venv/
 venv/
-ENV/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
+env/
 *.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
 
-# IDE
+# IDE and OS
 .vscode/
 .idea/
 *.swp
-*.swo
-*~
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Data & Caches
-climada_flood/data/cache/
-climada_flood/data/ems/
-climada_flood/data/ems_reference/
-climada_flood/data/manual/
-climada_flood/output/
-climada_flood/notebooks/output/
-
-# Exports & Large Binaries
+# Data, caches and generated output (all rebuilt by the pipeline)
+hazard_watch/data/
+hazard_watch/output/
+notebooks/**/output/
 *.zip
 *.tar.gz
 *.gpkg
 *.tif
 *.tiff
+*.nc
 *.pkl
 *.pickle
 *.h5
 *.hdf5
 
-# Local outputs
-output/
-exports/
-results/
-.cache/
-tmp/
-temp/
-
-# Project-specific
-.claude/settings.local.json
+# Local reference copies, not redistributed
 EMSR/
 climada_petals/
 
-# Environment
+# Private working notes, never published
+private/
+.superpowers/
+.claude/settings.local.json
+
+# Secrets
 .env
-.env.local
-.env.*.local
+.env.*
+*.key
+credentials.json
+service_account*.json
