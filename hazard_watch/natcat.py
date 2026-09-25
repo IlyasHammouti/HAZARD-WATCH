@@ -856,6 +856,10 @@ def _gdacs_event(feature: dict, window_start: date) -> dict:
         "event_name": (p.get("eventname") or "").strip(),
         "country": p.get("country", ""),
         "iso3": p.get("iso3", ""),
+        # Every country the event touches. `iso3` holds only one, and a
+        # drought alert routinely spans ten.
+        "countries_iso3": [c["iso3"] for c in p.get("affectedcountries") or []
+                           if c.get("iso3")],
         "alert_level": p["alertlevel"],
         "alert_score": p.get("alertscore"),
         "severity": severity.get("severity"),
@@ -982,6 +986,176 @@ def gdacs_aoi(event: dict, radius_km: float = 25.0) -> tuple:
     if aoi[2] - aoi[0] < 1e-4 or aoi[3] - aoi[1] < 1e-4:
         return _bbox_around(event["lon"], event["lat"], radius_km)
     return aoi
+
+
+# ---------------------------------------------------------------------------
+# Cyclone tracks
+# ---------------------------------------------------------------------------
+
+# IBTrACS "ACTIVE" subset: every storm active in roughly the last week, one
+# row per 3-hourly fix, carrying wind and Saffir-Simpson category. Measured on
+# 25 September 2026: the file ran to 24 September 00:00 UTC, a day and a half
+# behind real time, which is close enough for a digest of the week before.
+IBTRACS_ACTIVE = ("https://www.ncei.noaa.gov/data/international-best-track-"
+                  "archive-for-climate-stewardship-ibtracs/v04r01/access/csv/"
+                  "ibtracs.ACTIVE.list.v04r01.csv")
+TRACK_CACHE = Path(__file__).resolve().parent / "data" / "cache"
+
+
+def _number(text: str):
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def ibtracs_active(max_age_hours: float = 6.0) -> dict:
+    """IBTrACS storms, `{sid: {"name", "season", "basin", "fixes": [...]}}`.
+
+    Cached on disk and fetched again once the copy is older than
+    `max_age_hours`. A failed download falls back to the last copy, if any.
+    """
+    import csv
+    import io
+
+    path = TRACK_CACHE / "ibtracs_active.csv"
+    stale = (not path.exists()
+             or time.time() - path.stat().st_mtime > max_age_hours * 3600)
+    if stale:
+        try:
+            request = urllib.request.Request(IBTRACS_ACTIVE,
+                                             headers={"User-Agent": "natcat"})
+            with urllib.request.urlopen(request, timeout=120) as response:
+                raw = response.read()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(raw)
+        except (OSError, http.client.HTTPException) as error:
+            if not path.exists():
+                raise
+            warnings.warn(f"IBTrACS download failed, using the cached copy: "
+                          f"{error}", stacklevel=2)
+
+    rows = list(csv.DictReader(io.StringIO(path.read_text(encoding="utf-8"))))
+    storms = {}
+    for row in rows[1:]:                     # the second line holds units
+        lat, lon = _number(row["LAT"]), _number(row["LON"])
+        if lat is None or lon is None:
+            continue
+        storm = storms.setdefault(row["SID"], {
+            "sid": row["SID"], "name": row["NAME"].strip(),
+            "season": int(row["SEASON"]), "basin": row["BASIN"], "fixes": []})
+        winds = [_number(row.get(k)) for k in ("USA_WIND", "WMO_WIND")]
+        sshs = _number(row.get("USA_SSHS"))
+        storm["fixes"].append({
+            "time": datetime.fromisoformat(row["ISO_TIME"]),
+            "lat": lat, "lon": lon,
+            "wind_kt": next((w for w in winds if w is not None), None),
+            "category": int(sshs) if sshs is not None and sshs > -5 else None,
+        })
+    return storms
+
+
+def saffir_simpson(wind_kt) -> int | None:
+    """-1 depression, 0 tropical storm, 1 to 5 hurricane category."""
+    if wind_kt is None:
+        return None
+    for limit, category in ((34, -1), (64, 0), (83, 1), (96, 2), (113, 3),
+                            (137, 4)):
+        if wind_kt < limit:
+            return category
+    return 5
+
+
+def _gdacs_track(event: dict) -> list:
+    """Observed fixes from the GDACS track, without wind, as a fallback.
+
+    GDACS publishes each advisory position as a small circle whose `key` is
+    the fix time as MMDDHHMM. Circles later than the advisory itself
+    (`polygondate`) are forecast positions and are dropped.
+    """
+    fixes = []
+    year = event["from_date"].year
+    for feature in gdacs_geometry(event):
+        props = feature.get("properties") or {}
+        if props.get("featuretype") != "PointRadii":
+            continue
+        key, issued = props.get("key", ""), props.get("polygondate")
+        try:
+            when = datetime(year, int(key[:2]), int(key[2:4]),
+                            int(key[4:6]), int(key[6:8]))
+        except (ValueError, IndexError):
+            continue
+        if when < event["from_date"] - timedelta(days=60):
+            when = when.replace(year=year + 1)           # December into January
+        if issued and when > datetime.fromisoformat(issued):
+            continue
+        ring = np.asarray(feature["geometry"]["coordinates"][0])
+        fixes.append({"time": when, "lon": float(ring[:, 0].mean()),
+                      "lat": float(ring[:, 1].mean()),
+                      "wind_kt": None, "category": None})
+    return sorted(fixes, key=lambda f: f["time"])
+
+
+def _km(lat1, lon1, lat2, lon2) -> float:
+    dlon = (lon2 - lon1 + 180) % 360 - 180
+    x = math.radians(dlon) * math.cos(math.radians((lat1 + lat2) / 2))
+    return 6371.0 * math.hypot(x, math.radians(lat2 - lat1))
+
+
+def cyclone_track(event: dict) -> dict:
+    """The observed track of a GDACS cyclone.
+
+    Returns `{"source": "IBTrACS" | "GDACS" | None, "sid": ..., "fixes": [...]}`
+    with fixes in time order, each `{time, lat, lon, wind_kt, category}`.
+
+    GDACS and IBTrACS share no identifier. The storm is matched by name and
+    season first (`POLO-26` is `POLO`, 2026); a storm IBTrACS has not named
+    yet (`ONE-26`, listed as `UNNAMED`) is matched by position instead, the
+    IBTrACS storm passing closest to the GDACS point during the event, within
+    400 km. Without a match, the GDACS track is used and carries no wind.
+    """
+    name = (event.get("event_name") or "").rsplit("-", 1)[0].strip().upper()
+    start = event["from_date"] - timedelta(days=1)
+    finish = event["to_date"] + timedelta(days=1)
+
+    try:
+        storms = ibtracs_active()
+    except (OSError, http.client.HTTPException) as error:
+        warnings.warn(f"IBTrACS unavailable, using GDACS track: {error}",
+                      stacklevel=2)
+        storms = {}
+
+    def overlaps(storm):
+        return any(start <= f["time"] <= finish for f in storm["fixes"])
+
+    live = [s for s in storms.values() if overlaps(s)]
+    match = next((s for s in live if name and s["name"].upper() == name
+                  and abs(s["season"] - start.year) <= 1), None)
+    if match is None:
+        best = None
+        for storm in live:
+            distance = min(_km(f["lat"], f["lon"], event["lat"], event["lon"])
+                           for f in storm["fixes"]
+                           if start <= f["time"] <= finish)
+            if distance <= 400 and (best is None or distance < best[0]):
+                best = (distance, storm)
+        match = best[1] if best else None
+
+    gdacs = _gdacs_track(event)
+    if match is None:
+        return {"source": "GDACS" if gdacs else None, "sid": None,
+                "fixes": gdacs}
+
+    fixes = [dict(f) for f in match["fixes"]]
+    for fix in fixes:
+        if fix["category"] is None:
+            fix["category"] = saffir_simpson(fix["wind_kt"])
+    # IBTrACS runs a day or two behind GDACS. The positions GDACS has past the
+    # last IBTrACS fix are appended without wind rather than left off the end
+    # of the week.
+    tail = [g for g in gdacs if g["time"] > fixes[-1]["time"]]
+    return {"source": "IBTrACS" + (" + GDACS" if tail else ""),
+            "sid": match["sid"], "fixes": fixes + tail}
 
 
 def sentinel1_coverage(aoi: tuple, start: date, end: date) -> dict:

@@ -315,7 +315,8 @@ def terrain_colormap():
 
 def draw_basemap(ax, dem: np.ndarray, extent: tuple, vert_exag: float = 8,
                  shade_strength: float = 0.5, sea_level: float = 0.0,
-                 outside=None, outside_fade: float = 0.55):
+                 outside=None, outside_fade: float = 0.55,
+                 limits: tuple | None = None):
     """Hypsometric tint with hillshade, filling the axes edge to edge.
 
     Sea is painted flat: a hillshade computed over an ocean of zeros produces
@@ -324,6 +325,11 @@ def draw_basemap(ax, dem: np.ndarray, extent: tuple, vert_exag: float = 8,
     ``outside`` is an optional boolean mask of ground that carries no
     information. Terrain there is faded towards the page background so relief
     does not compete for attention where there is nothing to see.
+
+    ``limits`` fixes the elevations the tint runs between. By default it
+    stretches over the sheet's own range, which suits one map on its own; maps
+    that follow each other in a video need the same colour for the same
+    height, or the ground changes colour as the camera moves.
 
     Returns the rendered RGB array, which the glass elements sample.
     """
@@ -335,7 +341,7 @@ def draw_basemap(ax, dem: np.ndarray, extent: tuple, vert_exag: float = 8,
     finite = land[np.isfinite(land)]
     if finite.size == 0:
         finite = np.array([0.0, 1.0])
-    lo, hi = np.percentile(finite, 1), np.percentile(finite, 99.5)
+    lo, hi = limits or (np.percentile(finite, 1), np.percentile(finite, 99.5))
     norm = Normalize(vmin=lo, vmax=max(hi, lo + 1))
 
     ls = LightSource(azdeg=315, altdeg=42)
