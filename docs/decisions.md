@@ -400,6 +400,13 @@ hundred kilometres from the water (see the Rasuwa measurement above). The
 selection is a person's: the pipeline writes a picks file with a suggestion,
 one or two per peril, and renders whatever is left in it.
 
+**Cyclones are suggested on their peak in the week, not their alert level.**
+GDACS lists a storm at the level of its latest advisory. POLO-26 reached
+Category 5 (155 kt, IBTrACS) in the week of 21 September 2026 and was listed
+Green by the 25th, after weakening; ranked on alert level, the suggestion
+took a 45 kt Orange tropical storm instead. A cyclone that reached Category 3
+in the week now counts as serious whatever its current level.
+
 **Cyclone tracks come from IBTrACS, finished with GDACS.** GDACS publishes
 each advisory position as a small circle keyed `MMDDHHMM`, without wind, and
 mixes forecast positions in (any key later than the advisory's

@@ -114,6 +114,21 @@ def test_a_mistyped_key_is_refused():
         raise AssertionError("a malformed key was accepted")
 
 
+def test_a_category_five_outranks_an_orange_tropical_storm():
+    """GDACS lists a storm at the level of its latest advisory. POLO-26 was
+    Green by the time the week closed, after peaking at Category 5."""
+    polo = {"event_type": "TC", "alert_level": "Green", "alert_score": 1,
+            "severity": "0", "from_date": datetime(2026, 9, 21),
+            "week_peak": {"wind_kt": 155, "category": 5}}
+    one = {"event_type": "TC", "alert_level": "Orange", "alert_score": 2,
+           "severity": "0", "from_date": datetime(2026, 9, 22),
+           "week_peak": {"wind_kt": 45, "category": 0}}
+    weak = {**polo, "week_peak": {"wind_kt": 70, "category": 1}}
+    assert video._serious(polo) and video._serious(one)
+    assert not video._serious(weak)
+    assert video._significance(polo) > video._significance(one)
+
+
 def test_drought_region_drops_the_year_slug():
     assert video._drought_region({"event_name": "East Africa-2026"}) == "East Africa"
     assert video._drought_region({"event_name": "Uganda, Kenya-2026"}) == "Uganda, Kenya"

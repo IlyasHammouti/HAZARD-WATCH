@@ -281,9 +281,40 @@ def key_of(event: dict) -> str:
     return f"{event['event_type']}-{event['event_id']}"
 
 
+def _week_peak(event: dict, start: date, end: date) -> dict | None:
+    """A cyclone's strongest IBTrACS fix inside the week, or None.
+
+    GDACS keeps only the alert level of a storm's latest advisory: POLO-26
+    reached Category 5 in the week of 21 September 2026 and was listed Green
+    by the 25th, once it had weakened. The alert level alone would have
+    passed it over for a 45 kt tropical storm.
+    """
+    opens = datetime.combine(start, datetime.min.time())
+    closes = datetime.combine(end + timedelta(days=1), datetime.min.time())
+    try:
+        fixes = natcat.cyclone_track(event)["fixes"]
+    except Exception as error:                                 # noqa: BLE001
+        warnings.warn(f"No track for {event.get('event_name')}: {error}",
+                      stacklevel=2)
+        return None
+    inside = [f for f in fixes if opens <= f["time"] < closes and f["wind_kt"]]
+    if not inside:
+        return None
+    peak = max(inside, key=lambda f: f["wind_kt"])
+    return {"wind_kt": peak["wind_kt"], "category": peak["category"]}
+
+
+def _serious(event: dict) -> bool:
+    """Orange or Red, or a cyclone that reached Category 3 in the week."""
+    peak = event.get("week_peak") or {}
+    return (event["alert_level"] != "Green"
+            or (peak.get("category") is not None and peak["category"] >= 3))
+
+
 def _significance(event: dict) -> tuple:
     level = {"Red": 2, "Orange": 1}.get(event["alert_level"], 0)
-    return (level, event.get("alert_score") or 0,
+    peak = (event.get("week_peak") or {}).get("wind_kt") or 0
+    return (_serious(event), peak, level, event.get("alert_score") or 0,
             float(event.get("severity") or 0), event["from_date"])
 
 
@@ -296,9 +327,12 @@ def _describe(event: dict, regions: dict) -> str:
         place = region or place
     parts = [f"{peril}, {place}" if place else peril, event["alert_level"],
              report._digest_dates(event)]
-    fact = report._digest_fact(event)
-    if fact:
-        parts.append(fact)
+    peak = event.get("week_peak")
+    if peak:
+        parts.append(f"peak in the week {_category_name(peak['category'])}, "
+                     f"{peak['wind_kt']:.0f} kt (IBTrACS)")
+    elif report._digest_fact(event):
+        parts.append(report._digest_fact(event))
     return " - ".join(parts)
 
 
@@ -337,6 +371,9 @@ def candidates(monday) -> dict:
             pool.setdefault(key_of(event), event)
 
     events = list(pool.values())
+    for event in events:
+        if event["event_type"] == "TC":
+            event["week_peak"] = _week_peak(event, start, end)
     regions = natcat.event_regions(events)
     history = report._load_featured_history()
 
@@ -347,7 +384,7 @@ def candidates(monday) -> dict:
     suggested = []
     for kind in SCENE_TYPES:
         ranked = by_type.get(kind, [])
-        serious_ones = [e for e in ranked if e["alert_level"] != "Green"]
+        serious_ones = [e for e in ranked if _serious(e)]
         suggested += serious_ones[:2] or ranked[:1]
     suggested.sort(key=lambda e: e["from_date"])
     chosen = {key_of(e) for e in suggested}
