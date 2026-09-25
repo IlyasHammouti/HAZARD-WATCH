@@ -63,7 +63,9 @@ behind it exists. An alert never carries a loss figure.
 
 * **Weekly digest.** Every Monday, the events that started in the past week
   according to GDACS, grouped by peril. Alert levels as published, no loss
-  figure.
+  figure. Published as a short map video that flies from one event to the
+  next (cyclone tracks drawn from IBTrACS, droughts on a closing world view),
+  with the same week as a single figure alongside.
 * **Event posts.** One event followed through the chain: activation, official
   counts, then a modelled loss, updated as new damage grades are delivered.
 
@@ -83,11 +85,13 @@ hazard_watch/          the pipeline
   manual.py            imagery prepared for hand delineation, and its provenance check
   guards.py            what the evidence supports, kept apart from what may be reported
   report.py            the chain, maps, post drafts and the weekly digest
+  video.py             the weekly digest as a video: picks file, maps, flights, MP4
   carto.py             the visual identity shared by every graphic
   watch.py             finds new activations and drafts what is due; never publishes
   events.py            event definitions used for published cases
   check_sources.py     checks that what the docs claim about each data source is still true
   test_digest.py       self-checks for the weekly digest
+  test_video.py        self-checks for the video digest
   templates/           one text template per post type
 docs/
   decisions.md         settled technical decisions and measured facts
@@ -133,12 +137,23 @@ Commands are run from `hazard_watch/`:
 conda run -n climada_env python -c "import report; d = report.weekly_digest(monday='2026-09-21'); print(d['plain_path'], d['figure_path'])"
 ```
 
+The video digest is two commands with an edit between them. The first lists
+the week's events and writes `output/digests/video/<monday>-picks.txt`, with a
+suggestion already in it; delete, reorder or add lines, attach a clip with its
+source if there is one, then render:
+
+```bash
+conda run -n climada_env python video.py candidates 2026-09-28
+conda run -n climada_env python video.py render 2026-09-28
+```
+
 ```bash
 conda run -n climada_env python -c "import ee, natcat; ee.Initialize(project=natcat.EE_PROJECT); import report, events; o = report.make_post(events.EMSR927); print(o['verdict'].report())"
 ```
 
 ```bash
 conda run -n climada_env python test_digest.py
+conda run -n climada_env python test_video.py
 ```
 
 ```bash

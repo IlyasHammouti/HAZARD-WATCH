@@ -30,6 +30,30 @@ kept whatever its age. Pending cases with their expected satellite pass dates.
 Nothing that began before the week is listed. A drought open since last
 November was most of the list, and it was not what happened last week.
 
+### The video
+
+The same week, as a video of about a minute (`video.py`). It opens on the
+world with every event marked, flies to each in turn, and closes on the
+world again with the droughts filled in.
+
+| Peril | On screen |
+|---|---|
+| Tropical cyclone | Its track through the week draws itself, dated each midnight UTC, with category and wind from IBTrACS as it goes |
+| Earthquake | The epicentre, pulsing; the pulse scales with magnitude |
+| Volcano | The volcano, pulsing |
+| Flood, wildfire | The GDACS point, pulsing. Never an area: no extent exists on a Monday |
+| Drought | No scene. Its countries fill in on the closing world view, with the start date |
+
+The choice of events is made by hand from a suggested list, to spread the
+video across the world and across the week. A clip may follow any scene, with
+its source printed on it; the pipeline never fetches footage itself. Every
+figure on screen names its source on the same line (H15), and the closing card
+carries `L-SRC-GDACS` and `L-DISC-FEED`.
+
+Length follows the events, not a target: roughly a minute for six scenes.
+LinkedIn's own guidance for B2B video is to stay under three minutes, and
+Socialinsider's engagement benchmarks show no penalty below that.
+
 ## Type 2 — Alert
 
 For a significant event still unfolding, before any extent is observable.

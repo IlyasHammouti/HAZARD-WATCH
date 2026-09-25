@@ -30,6 +30,9 @@ Last verified: 2026-08-29.
 | GFM flood extent | `stac.eodc.eu/api/v1/search`, collection `GFM` | **None** | Fully open. GeoTIFF download confirmed (HTTP 206, valid TIFF). GeoVille account **not required** for programmatic access. |
 | Copernicus EMS activations | `rapidmapping.emergency.copernicus.eu/backend/dashboard-api/public-activations/?code=<EMSR code>` | None | Returns AOI geometries, products, timeline. |
 | USGS earthquakes | `earthquake.usgs.gov/fdsnws/event/1/query` | None | 15 events M5.5+ in a sample week, all with ShakeMap. |
+| IBTrACS, active storms | `ncei.noaa.gov/data/international-best-track-archive-for-climate-stewardship-ibtracs/v04r01/access/csv/ibtracs.ACTIVE.list.v04r01.csv` | None | 3-hourly fixes with wind and Saffir-Simpson category. On 25 September 2026 its last fix was 24 September 00:00 UTC, about 1.5 days behind GDACS. `v04r02` answers 404. |
+| GMTED2010 | Earth Engine `USGS/GMTED2010_FULL`, band `mea` | Earth Engine | Global land elevation, 7.5 arc-seconds. `USGS/GMTED2010` is deprecated. |
+| Natural Earth | through `cartopy.io.shapereader.natural_earth` | None | Borders, coast, lakes, place and sea names. Downloaded once, cached by cartopy. |
 
 ## Copernicus EMS never publishes a monetary value — checked, not assumed
 
@@ -381,6 +384,47 @@ replacing the uniform-depth assumption.
 **Flood extent**: GFM as primary source. The hand-rolled Sentinel-1 threshold
 is kept as a methodological demonstration and as a fallback for events GFM
 misses.
+
+### Weekly digest video — how it is made, and what was measured
+
+`video.py` renders the weekly digest as an MP4 (1080 × 1350, H.264, 30 fps,
+silent audio track). The image digest is still produced alongside it.
+
+**Which events get a scene.** Cyclone, earthquake, volcano, flood and
+wildfire each get a zoomed scene, because each has a point or a track on
+Monday morning without waiting for a satellite pass. Drought gets none: it
+appears on the closing world view, its countries filled with the start date.
+Flood and wildfire are shown as the GDACS point, never as an area, and the
+flood card says so: the GDACS flood point is a basin centroid and can sit a
+hundred kilometres from the water (see the Rasuwa measurement above). The
+selection is a person's: the pipeline writes a picks file with a suggestion,
+one or two per peril, and renders whatever is left in it.
+
+**Cyclone tracks come from IBTrACS, finished with GDACS.** GDACS publishes
+each advisory position as a small circle keyed `MMDDHHMM`, without wind, and
+mixes forecast positions in (any key later than the advisory's
+`polygondate`). IBTrACS carries wind and category but ran 1.5 days behind on
+25 September 2026. So the track is IBTrACS, matched by name and season or,
+for a storm IBTrACS has not named yet (`ONE-26` is `UNNAMED`), by the closest
+pass to the GDACS point within 400 km; GDACS positions after the last IBTrACS
+fix are appended and drawn in a neutral colour, with "no wind yet" on screen.
+
+**Rendering.** Every map is drawn once, with matplotlib, in Web Mercator.
+What moves is composited on top with numpy. Between scenes the camera flies
+from one frozen image to the next over a world map rendered once at three
+times the frame size; nothing is re-projected per frame. Mercator makes this
+exact, since every map is a crop of the same plane. Measured on 25 September
+2026: a 46-second video with four scenes renders in about four minutes on
+this laptop, a 67-second one with six scenes and a clip in about seven.
+
+**Rejected, with the reason.** moviepy: every frame is already composited in
+numpy, and ffmpeg (installed with the environment) takes raw frames on a pipe
+directly. MovingPandas: position at a given time is `numpy.interp` on the
+fixes, and the antimeridian needs `numpy.unwrap` either way. QGIS Temporal
+Controller: the week's geometry changes every Monday, so it means either a
+hand reconfiguration each week or PyQGIS, a second GIS runtime. kepler.gl /
+deck.gl: a browser runtime for trail rendering at a scale this never reaches.
+Flourish: a hosted service outside the reproducible pipeline.
 
 ### Urban under-detection — measured, and the three-level response
 
