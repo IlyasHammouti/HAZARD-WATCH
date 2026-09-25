@@ -109,11 +109,10 @@ VIDEO_DIR = report.OUTPUT / "digests" / "video"
 VIDEO_CACHE = report.CACHE / "video"
 DEM_ASSET = "USGS/GMTED2010_FULL"
 
-SOURCES = [
-    "Event alerts: GDACS (European Commission, United Nations).",
-    "Cyclone tracks: IBTrACS v04r01 (NOAA NCEI).",
-    "Relief: GMTED2010 (USGS). Places and borders: Natural Earth.",
-]
+# Credited only when used (rules section 8): IBTrACS only in a week that
+# shows a cyclone track. GDACS is credited through its locked phrase.
+TRACK_CREDIT = "Cyclone tracks: IBTrACS v04r01 (NOAA NCEI)."
+MAP_CREDIT = "Relief: GMTED2010 (USGS). Places and borders: Natural Earth."
 
 PAPER = np.array(mcolors.to_rgb(carto.THEME["background"]), np.float32)
 
@@ -1105,7 +1104,7 @@ class Chrome:
     Two layers rather than one, so the frame's middle is never touched.
     """
 
-    def __init__(self, start: date, end: date):
+    def __init__(self, start: date, end: date, tracks: bool = True):
         top = blank()
         _scrim(top, 175, 300)
         text(top, (MARGIN, 72), "HAZARD WATCH · WEEKLY REPORT", 21, FAINT, bold=True)
@@ -1115,8 +1114,8 @@ class Chrome:
 
         bottom = blank()
         _scrim(bottom, H - 58, H - 92)
-        text(bottom, (MARGIN, H - 28), "Alerts: GDACS · Tracks: IBTrACS · "
-             "Relief: GMTED2010 · Places: Natural Earth", 17, FAINT)
+        parts = ["Alerts: GDACS"] + (["Tracks: IBTrACS"] if tracks else [])             + ["Relief: GMTED2010", "Places: Natural Earth"]
+        text(bottom, (MARGIN, H - 28), " · ".join(parts), 17, FAINT)
         self.layers = [Layer(np.asarray(top)), Layer(np.asarray(bottom))]
 
     def over(self, frame: np.ndarray):
@@ -1771,7 +1770,7 @@ class EndCard:
 
         y = 900
         locked = report.locked_phrases()
-        lines = [locked["L-SRC-GDACS"]] + SOURCES[1:] + credits
+        lines = [locked["L-SRC-GDACS"]] + credits
         for block, size, colour in ((" ".join(lines), 21, FAINT),
                                     (locked["L-DISC-FEED"], 21, INK)):
             for line in _wrap(block, size, W - 2 * MARGIN):
@@ -1874,9 +1873,12 @@ def build(monday, picks_path=None) -> dict:
     timeline.append(outro)
 
     colours = [carto.PERIL_COLOURS[PERIL_KEY[e["event_type"]]] for e in events]
+    tracks = any(isinstance(scene, TrackScene) for _, _, scene in scenes)
+    credits = (([TRACK_CREDIT] if tracks else []) + [MAP_CREDIT]
+               + [f"Video: {p['source']}." for p, _, _ in scenes if p["clip"]])
     return {"timeline": timeline, "start": start, "end": end,
             "colours": colours, "paths": paths, "outro": outro,
-            "credits": [f"Video: {p['source']}." for p, _, _ in scenes if p["clip"]]}
+            "tracks": tracks, "credits": credits}
 
 
 class Encoder:
@@ -1918,7 +1920,7 @@ def render(monday, picks_path=None) -> dict:
     began = time.time()
     plan = build(monday, picks_path)
     timeline, paths = plan["timeline"], plan["paths"]
-    frame_chrome = Chrome(plan["start"], plan["end"])
+    frame_chrome = Chrome(plan["start"], plan["end"], plan["tracks"])
     total = len(plan["colours"])
     strips = {None: Layer(np.zeros((1, 1, 4), np.float32))}
     for chapter in range(total):
