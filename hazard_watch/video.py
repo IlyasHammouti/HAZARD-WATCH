@@ -70,11 +70,11 @@ SCENE_TYPES = ("TC", "EQ", "VO", "FL", "WF")
 
 # Seconds on screen, by peril. A track needs time to be followed; a point
 # needs only long enough to be found and read.
-SCENE_SECONDS = {"TC": 7.5, "EQ": 5.0, "VO": 5.0, "FL": 4.5, "WF": 4.5}
-INTRO_SECONDS = 2.6
-OUTRO_HOLD = 2.8
-DROUGHT_STAGGER = 0.7
-END_SECONDS = 4.5
+SCENE_SECONDS = {"TC": 10.0, "EQ": 7.0, "VO": 7.0, "FL": 6.5, "WF": 6.5}
+INTRO_SECONDS = 3.2
+OUTRO_HOLD = 4.0
+DROUGHT_STAGGER = 1.0
+END_SECONDS = 5.5
 
 # Green events listed as candidates, per peril. The suggestion takes one or
 # two per peril; the rest are there to be swapped in by hand.
@@ -90,8 +90,14 @@ PERIL_KEY = {"TC": "storm", "EQ": "earthquake", "VO": "volcano",
 # Frame layout, in pixels. The map runs edge to edge; its information sits
 # between the header and the title card.
 MARGIN = 64
-SAFE_TOP, SAFE_BOTTOM = 205, 985
+SAFE_TOP, SAFE_BOTTOM = 205, 880
 LABEL_TOP = 250                    # place names stay clear of the header fade
+# The paper band at the bottom never moves: it fades in from BAND_FADE and is
+# solid from BAND_SOLID, whether or not a card is on it.
+BAND_FADE, BAND_SOLID = 870, 1000
+OWNER = "© Ilyas Hammouti"
+# Where the owner's mark sits, bottom right of the map, clear of the fade.
+OWNER_BOX = (W - 36 - 200, BAND_FADE - 42, W - 36, BAND_FADE - 6)
 FOCUS_Y = (SAFE_TOP + SAFE_BOTTOM) / 2 / H
 WORLD_LATS = (-58.0, 78.0)
 WORLD_SCALE = 3                    # world map resolution, for the zooms
@@ -262,7 +268,7 @@ def flight_seconds(a: View, b: View) -> float:
     d = math.hypot(b.cx - a.cx, b.cy - a.cy)
     lift = max(0.0, math.log(max(1.4 * d / max(a.width, b.width), 1e-9)))
     zoom = abs(math.log(a.width / b.width))
-    return float(np.clip(1.2 + 0.18 * zoom + 0.3 * lift, 1.2, 2.6))
+    return float(np.clip(1.5 + 0.2 * zoom + 0.35 * lift, 1.6, 3.0))
 
 
 # ---------------------------------------------------------------------------
@@ -798,7 +804,7 @@ def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
 
 def text(image: Image.Image, xy, words: str, size: int, colour,
          bold: bool = False, anchor: str = "ls", alpha: float = 1.0,
-         halo=None) -> float:
+         halo=None, halo_strength: float = 0.9) -> float:
     """Anti-aliased text onto a transparent RGBA image; returns its width.
 
     Drawn as a coverage mask and filled with the colour, so the edges carry
@@ -817,7 +823,7 @@ def text(image: Image.Image, xy, words: str, size: int, colour,
         glow = mask.filter(ImageFilter.MaxFilter(5)).filter(
             ImageFilter.GaussianBlur(1.5))
         paint = Image.new("RGBA", mask.size, _rgba(halo, 0))
-        paint.putalpha(glow.point(lambda v: int(v * 0.9 * alpha)))
+        paint.putalpha(glow.point(lambda v: int(v * halo_strength * alpha)))
         image.alpha_composite(paint, dest=box)
     paint = Image.new("RGBA", mask.size, _rgba(colour, 0))
     paint.putalpha(mask.point(lambda v: int(v * alpha)))
@@ -889,9 +895,20 @@ def marker(colour: str, number: int | None = None, size: int = 30,
         edge = big * 0.12
         draw.ellipse((edge, edge, big - 1 - edge, big - 1 - edge), fill=_rgba(colour))
     if number is not None:
-        face = font(int(big * 0.52), True)
-        draw.text((big / 2, big / 2 + big * 0.02), str(number), font=face,
-                  anchor="mm", fill=_rgba("#FFFFFF"))
+        # Centred on the digits' own ink, not on the font's line box: a
+        # font's middle sits between ascender and descender, and digits have
+        # no descender, so "mm" leaves every number low in its disc.
+        face = font(int(big * 0.5), True)
+        glyphs = Image.new("L", (big, big), 0)
+        ImageDraw.Draw(glyphs).text((big / 2, big / 2), str(number), font=face,
+                                    anchor="mm", fill=255)
+        left, top, right, bottom = glyphs.getbbox()
+        centre = (big - 1) / 2
+        shift = (round(centre - (left + right - 1) / 2),
+                 round(centre - (top + bottom - 1) / 2))
+        white = Image.new("RGBA", (big, big), _rgba("#FFFFFF"))
+        image.paste(white, (0, 0), glyphs.transform(
+            glyphs.size, Image.Transform.AFFINE, (1, 0, -shift[0], 0, 1, -shift[1])))
     return image.resize((size, size), Image.Resampling.LANCZOS)
 
 
@@ -924,6 +941,174 @@ def cyclone_glyph(colour: str, size: int = 46) -> Image.Image:
     draw.ellipse((c - big * 0.13, c - big * 0.13, c + big * 0.13, c + big * 0.13),
                  fill=_rgba(colour))
     return image.resize((size, size), Image.Resampling.LANCZOS)
+
+
+class Sprite:
+    """A small premultiplied RGBA drawing, made three times too large and
+    averaged down, which is what gives the animated glyphs clean edges.
+    Coordinates are in the sprite's own pixels."""
+
+    SS = 3
+
+    def __init__(self, size: int):
+        self.size, self.big = size, size * self.SS
+        self.rgba = np.zeros((self.big, self.big, 4), np.float32)
+
+    def _over(self, alpha: np.ndarray, box: tuple, colour, strength: float):
+        y0, y1, x0, x1 = box
+        a = (alpha * strength)[..., None]
+        region = self.rgba[y0:y1, x0:x1]
+        region *= 1 - a
+        region[..., :3] += rgb(colour) * a
+        region[..., 3:] += a
+
+    def disc(self, x, y, r, colour, strength: float = 1.0, soft: float = 1.0):
+        if strength <= 0.002:
+            return
+        s = self.SS
+        cx, cy, radius, edge = x * s, y * s, r * s, max(soft * s, 1.0)
+        reach = radius + edge + 1
+        x0, x1 = max(0, int(cx - reach)), min(self.big, int(cx + reach) + 1)
+        y0, y1 = max(0, int(cy - reach)), min(self.big, int(cy + reach) + 1)
+        if x1 <= x0 or y1 <= y0:
+            return
+        yy, xx = np.mgrid[y0:y1, x0:x1]
+        d = np.hypot(xx + 0.5 - cx, yy + 0.5 - cy)
+        self._over(np.clip((radius - d) / edge + 0.5, 0, 1).astype(np.float32),
+                   (y0, y1, x0, x1), colour, strength)
+
+    def _shape(self, draw, colour, strength: float):
+        if strength <= 0.002:
+            return
+        mask = Image.new("L", (self.big, self.big), 0)
+        draw(ImageDraw.Draw(mask), self.SS)
+        self._over(np.asarray(mask, np.float32) / 255,
+                   (0, self.big, 0, self.big), colour, strength)
+
+    def polygon(self, points, colour, strength: float = 1.0):
+        self._shape(lambda d, s: d.polygon([(x * s, y * s) for x, y in points],
+                                           fill=255), colour, strength)
+
+    def line(self, points, width: float, colour, strength: float = 1.0):
+        def draw(d, s):
+            scaled = [(x * s, y * s) for x, y in points]
+            d.line(scaled, fill=255, width=max(1, round(width * s)), joint="curve")
+            r = width * s / 2
+            for px, py in (scaled[0], scaled[-1]):
+                d.ellipse((px - r, py - r, px + r, py + r), fill=255)
+        self._shape(draw, colour, strength)
+
+    def done(self) -> np.ndarray:
+        s = self.SS
+        return self.rgba.reshape(self.size, s, self.size, s, 4).mean(axis=(1, 3))
+
+
+def stamp(frame: np.ndarray, sprite: np.ndarray, x: float, y: float,
+          alpha: float = 1.0):
+    """Composite a premultiplied sprite onto the frame, centred on (x, y)."""
+    if alpha <= 0.002:
+        return
+    h, w = sprite.shape[:2]
+    left, top = int(round(x - w / 2)), int(round(y - h / 2))
+    a0, a1 = max(0, -top), min(h, frame.shape[0] - top)
+    b0, b1 = max(0, -left), min(w, frame.shape[1] - left)
+    if a1 <= a0 or b1 <= b0:
+        return
+    piece = sprite[a0:a1, b0:b1]
+    region = frame[top + a0:top + a1, left + b0:left + b1]
+    region *= 1 - piece[..., 3:] * alpha
+    region += piece[..., :3] * alpha
+
+
+def _badge(sprite: Sprite, c: float, colour: str):
+    """White disc with a ring in the peril's colour, and a white rim."""
+    sprite.disc(c, c, 28.5, "#FFFFFF")
+    sprite.disc(c, c, 27, colour)
+    sprite.disc(c, c, 23.5, "#FFFFFF")
+
+
+def quake_glyph(colour: str, t: float, shock: float) -> np.ndarray:
+    """A seismograph trace that jumps at every shock."""
+    sprite, c = Sprite(72), 36
+    _badge(sprite, c, colour)
+    xs = np.linspace(-19, 19, 70)
+    envelope = np.exp(-(xs / 9.5) ** 2)
+    amplitude = 2.5 + 9.5 * shock
+    ys = amplitude * envelope * (np.sin(xs * 1.05 - t * 16)
+                                 + 0.35 * np.sin(xs * 2.3 + t * 9))
+    sprite.line(list(zip(c + xs, c + ys)), 2.4, colour)
+    return sprite.done()
+
+
+def flood_glyph(colour: str, t: float) -> np.ndarray:
+    """Three lines of water, running."""
+    sprite, c = Sprite(72), 36
+    _badge(sprite, c, colour)
+    xs = np.linspace(-17, 17, 50)
+    for i, dy in enumerate((-8, 0, 8)):
+        ys = c + dy + 2.8 * np.sin(xs * 0.42 + t * 5.5 + i * 1.1)
+        sprite.line(list(zip(c + xs, ys)), 2.6, colour, 1.0 - 0.18 * i)
+    return sprite.done()
+
+
+def volcano_glyph(colour: str, t: float) -> np.ndarray:
+    """A cone with an ash plume drifting off it and sparks from the crater."""
+    sprite, c = Sprite(150), 75
+    top, base = c - 8, c + 16
+    rising = ramp(t, 0.3, 1.0)
+    for k in range(12):
+        age = (t * 0.45 + k / 12) % 1.0
+        shade = 0.40 + 0.30 * age
+        sprite.disc(c + 26 * age ** 1.6 + 3 * math.sin(k * 2.1 + t * 1.5),
+                    top - 4 - 58 * age, 4 + 14 * age, (shade, shade, shade + 0.02),
+                    0.8 * (1 - age) ** 1.2 * rising, soft=2.5)
+    sprite.polygon([(c - 33, base + 2.5), (c - 9.5, top - 2.5),
+                    (c + 9.5, top - 2.5), (c + 33, base + 2.5)], "#FFFFFF")
+    sprite.polygon([(c - 30, base), (c - 8, top), (c + 8, top), (c + 30, base)],
+                   colour)
+    sprite.disc(c, top + 1, 6.5, "#FF7A1A", 0.6 + 0.4 * math.sin(t * 5.0) ** 2,
+                soft=1.5)
+    for k in range(6):
+        age = (t * 1.1 + k / 6) % 1.0
+        sprite.disc(c + (k - 2.5) * 7 * age, top - 30 * age + 38 * age * age,
+                    1.9, "#FFB23B", (1 - age) * rising, soft=0.8)
+    return sprite.done()
+
+
+def _flame(cx: float, base: float, height: float, w: float, sway: float) -> list:
+    """A flame outline: round at the bottom, drawn to a swaying tip."""
+    theta = np.linspace(np.pi, 2 * np.pi, 16)
+    arc = list(zip(cx + w * np.cos(theta), base - w - w * np.sin(theta)))
+    tip = np.array((cx + sway, base - height))
+
+    def curve(p0, p1, p2, n=14):
+        u = np.linspace(0, 1, n)[:, None]
+        return [tuple(p) for p in (1 - u) ** 2 * np.array(p0)
+                + 2 * (1 - u) * u * np.array(p1) + u ** 2 * np.array(p2)]
+
+    shoulder = base - w - (height - w) * 0.6
+    right = curve((cx + w, base - w), (cx + w * 0.95 + sway * 0.2, shoulder), tip)
+    left = curve(tip, (cx - w * 0.95 + sway * 0.2, shoulder), (cx - w, base - w))
+    return arc + right[1:] + left[1:]
+
+
+def fire_glyph(colour: str, t: float) -> np.ndarray:
+    """A flickering flame with embers rising off it."""
+    sprite, c = Sprite(110), 55
+    base = c + 20
+    flicker = 1 + 0.10 * math.sin(t * 11) + 0.06 * math.sin(t * 23 + 1.3)
+    sway = 3.5 * math.sin(t * 6) + 1.5 * math.sin(t * 13)
+    sprite.disc(c, base - 16, 30, "#FF8A2A", 0.16 + 0.04 * math.sin(t * 9), soft=14)
+    sprite.polygon(_flame(c, base + 2.5, 46 * flicker + 5, 16.5, sway), "#FFFFFF")
+    sprite.polygon(_flame(c, base, 46 * flicker, 14, sway), colour)
+    sprite.polygon(_flame(c, base - 1, 33 * flicker, 9.5, sway * 0.8), "#F08A24")
+    sprite.polygon(_flame(c, base - 2, 20 * flicker, 5.5, sway * 0.6), "#FFD34D")
+    rising = ramp(t, 0.3, 0.8)
+    for k in range(7):
+        age = (t * 0.7 + k / 7) % 1.0
+        sprite.disc(c + (k - 3) * 4 + 7 * math.sin(age * 6 + k), base - 22 - 50 * age,
+                    1.7 * (1 - age) + 0.6, "#FFB23B", (1 - age) * rising, soft=0.8)
+    return sprite.done()
 
 
 class Source:
@@ -986,7 +1171,7 @@ def place_names(view: View, avoid: list, cities: int = 6, countries: int = 4,
     outside the map's safe area or cover the event is skipped, not squeezed.
     """
     zoom = view.zoom()
-    placed = [tuple(b) for b in avoid]
+    placed = [tuple(b) for b in avoid] + [OWNER_BOX]
     chosen = []
 
     def free(b):
@@ -1090,32 +1275,56 @@ def _scrim(image: Image.Image, solid: int, clear: int, strength: float = 0.94):
 
 @lru_cache(maxsize=None)
 def brand(height: int) -> Image.Image:
-    """The wordmark with its own transparency, cropped to its ink."""
+    """The wordmark cropped to its ink, `height` pixels tall.
+
+    The PNG carries a paper-coloured square at 6 % opacity behind the mark.
+    Cropping on any alpha kept that square, so the mark filled 40 % of its
+    box and a faint rectangle showed around it. Anything that faint is
+    dropped before cropping.
+    """
     mark = Image.open(carto.BRAND_MARK).convert("RGBA")
-    mark = mark.crop(mark.getchannel("A").point(lambda v: 255 if v > 15 else 0)
-                     .getbbox())
-    return mark.resize((int(mark.width * height / mark.height), height),
+    alpha = mark.getchannel("A").point(lambda v: 0 if v <= 40 else v)
+    mark.putalpha(alpha)
+    mark = mark.crop(alpha.getbbox())
+    return mark.resize((round(mark.width * height / mark.height), height),
                        Image.Resampling.LANCZOS)
 
 
 class Chrome:
-    """What stays on screen the whole time: header, and the sources line.
+    """What stays on screen the whole time: the two paper bands, the header,
+    the sources line and the owner's mark.
 
-    Two layers rather than one, so the frame's middle is never touched.
+    The bottom band is here and not on the cards, so it stays put while the
+    camera flies between scenes. Two layers rather than one, so the middle
+    of the frame is never touched.
     """
 
     def __init__(self, start: date, end: date, tracks: bool = True):
         top = blank()
-        _scrim(top, 175, 300)
-        text(top, (MARGIN, 72), "HAZARD WATCH · WEEKLY REPORT", 21, FAINT, bold=True)
-        text(top, (MARGIN, 120), report._date_span(start, end), 38, INK, bold=True)
-        mark = brand(96)
-        top.alpha_composite(mark, dest=(W - MARGIN - mark.width, 30))
+        _scrim(top, 175, 300, strength=1.0)
+        heading = "HAZARD WATCH · WEEKLY REPORT"
+        dates = report._date_span(start, end)
+        text(top, (MARGIN, 72), heading, 21, FAINT, bold=True)
+        text(top, (MARGIN, 120), dates, 38, INK, bold=True)
+        # The mark is exactly as tall as the two lines beside it, from the
+        # first line's capitals to the second line's descenders.
+        draw = ImageDraw.Draw(top)
+        upper = draw.textbbox((MARGIN, 72), heading, font=font(21, True),
+                              anchor="ls")[1]
+        lower = draw.textbbox((MARGIN, 120), dates, font=font(38, True),
+                              anchor="ls")[3]
+        mark = brand(int(lower - upper))
+        top.alpha_composite(mark, dest=(W - MARGIN - mark.width, int(upper)))
 
         bottom = blank()
-        _scrim(bottom, H - 58, H - 92)
-        parts = ["Alerts: GDACS"] + (["Tracks: IBTrACS"] if tracks else [])             + ["Relief: GMTED2010", "Places: Natural Earth"]
+        _scrim(bottom, BAND_SOLID, BAND_FADE, strength=1.0)
+        parts = (["Alerts: GDACS"] + (["Tracks: IBTrACS"] if tracks else [])
+                 + ["Relief: GMTED2010", "Places: Natural Earth"])
         text(bottom, (MARGIN, H - 28), " · ".join(parts), 17, FAINT)
+        # White, on the map just above the band's fade, with a soft shadow so
+        # it reads over pale water as well as over land.
+        text(bottom, (OWNER_BOX[2], OWNER_BOX[3] - 8), OWNER, 22, "#FFFFFF",
+             bold=True, anchor="rs", halo=INK, halo_strength=0.5)
         self.layers = [Layer(np.asarray(top)), Layer(np.asarray(bottom))]
 
     def over(self, frame: np.ndarray):
@@ -1124,7 +1333,7 @@ class Chrome:
 
 
 def chapters(total: int, current: int | None, colours: list) -> Layer:
-    """One dot per scene under the logo, the current one filled and larger."""
+    """One dot per scene, bottom right, the current one filled and larger."""
     image = blank()
     gap = 22
     x = W - MARGIN - (total - 1) * gap
@@ -1136,8 +1345,41 @@ def chapters(total: int, current: int | None, colours: list) -> Layer:
         else:
             dot = marker("#C9C4BA", None, 12)
         image.alpha_composite(dot, dest=(int(x + i * gap - dot.width / 2),
-                                         int(158 - dot.height / 2)))
+                                         int(H - 34 - dot.height / 2)))
     return Layer(np.asarray(image))
+
+
+# Figures in a card line are set bold: a number with its unit is what a
+# reader scans for, and in regular weight "20,000 ha" hid inside its sentence.
+FIGURE = re.compile(r"Magnitude \d+(?:\.\d+)?|Category \d"
+                    r"|\d[\d,]*(?:\.\d+)?\s?(?:km2|km/h|km|ha|kt|mph|%)")
+
+
+def emphasise(line: str) -> str:
+    """`**`-mark the figures in a line, unless it is marked already."""
+    if not line or "**" in line:
+        return line
+    return FIGURE.sub(lambda m: f"**{m.group(0)}**", line)
+
+
+def runs(line, colour: str = FAINT, strong: str = INK) -> list:
+    """`(words, colour, bold)` runs: a string with `**bold**`, or runs as is."""
+    if not isinstance(line, str):
+        return line
+    return [(part, strong if i % 2 else colour, bool(i % 2))
+            for i, part in enumerate(line.split("**")) if part]
+
+
+def rich(image: Image.Image, xy, parts: list, size: int) -> float:
+    """Runs drawn one after another on a baseline; returns the total width."""
+    x, y = xy
+    for words, colour, bold in parts:
+        x += text(image, (x, y), words, size, colour, bold=bold)
+    return x - xy[0]
+
+
+def rich_width(parts: list, size: int) -> float:
+    return sum(font(size, bold).getlength(words) for words, _, bold in parts)
 
 
 def _fit(words: str, size: int, bold: bool, width: float) -> int:
@@ -1148,10 +1390,13 @@ def _fit(words: str, size: int, bold: bool, width: float) -> int:
 
 def card(peril: str, alert: str | None, title: str, lines: list,
          colour: str, note: str = "") -> Layer:
-    """The title card: peril and alert, the name, then what the feed says."""
-    image = blank()
-    _scrim(image, 1000, 880, strength=0.95)
+    """The title card: peril and alert, the name, then what the feed says.
 
+    Text only: the paper under it belongs to the chrome, which never moves.
+    A line is a string, with `**` around what should stand out, or a list
+    of `(words, colour, bold)` runs.
+    """
+    image = blank()
     y = 1030
     ImageDraw.Draw(image).rectangle((MARGIN, y - 22, MARGIN + 6, y + 1),
                                     fill=_rgba(colour))
@@ -1164,9 +1409,11 @@ def card(peril: str, alert: str | None, title: str, lines: list,
     y += 68
     for line, size in lines + ([(note, 20)] if note else []):
         if line:
+            parts = runs(line)
+            while size > 18 and rich_width(parts, size) > W - 2 * MARGIN:
+                size -= 1
             y += size + 16
-            text(image, (MARGIN, y), line, _fit(line, size, False, W - 2 * MARGIN),
-                 FAINT)
+            rich(image, (MARGIN, y), parts, size)
     return Layer(np.asarray(image))
 
 
@@ -1195,7 +1442,12 @@ def _where(event: dict, regions: dict) -> tuple:
 # ---------------------------------------------------------------------------
 
 class Scene:
-    """A frozen map with things moving on it, and a card."""
+    """A frozen map with things moving on it, and a card.
+
+    `frames` yields the map alone; the card is drawn by `decorate`, which
+    the renderer calls after the chrome, so the text sits on the paper band
+    rather than under it.
+    """
 
     duration = 0.0
     view: View = None
@@ -1209,10 +1461,7 @@ class Scene:
 
     def frames(self):
         for i in range(int(round(self.duration * FPS))):
-            t = i / FPS
-            frame = self.map(t)
-            self.decorate(frame, t)
-            yield frame
+            yield self.map(i / FPS)
 
     def first(self) -> np.ndarray:
         return self.map(0.0)
@@ -1297,11 +1546,11 @@ class TrackScene(Scene):
                  if t0 <= t <= t1 and f["wind_kt"] is not None]
         if shown:
             peak = max(shown, key=lambda f: f["wind_kt"])
-            fact = (f"Peak in the week: {_category_name(peak['category'])}, "
-                    f"{_wind(peak['wind_kt'])} · IBTrACS")
+            fact = (f"Peak in the week: **{_category_name(peak['category'])}, "
+                    f"{_wind(peak['wind_kt'])}** · IBTrACS")
         else:
             fact = report._digest_fact(event)
-            fact = f"{fact} · GDACS" if fact else ""
+            fact = f"{emphasise(fact)} · GDACS" if fact else ""
         where = " · ".join(p for p in (place, report._digest_dates(event)) if p)
         self.card = card("Tropical cyclone", _alert(event), title,
                          [(where, 30), (fact, 26)], self.colour)
@@ -1382,7 +1631,7 @@ class TrackScene(Scene):
         return ticks
 
     def _now(self, t: float) -> float:
-        draw_from, draw_to = 0.7, self.duration - 1.2
+        draw_from, draw_to = 0.9, self.duration - 1.6
         p = (t - draw_from) / (draw_to - draw_from)
         p = min(max(p, 0.0), 1.0)
         return self.times[0] + (self.times[-1] - self.times[0]) * p
@@ -1417,24 +1666,35 @@ class TrackScene(Scene):
         stamp = (f"{when.day} {report.MONTHS[when.month - 1][:3]} "
                  f"{when:%H}:00 UTC")
         category, wind = self.category[index], self.wind[index]
-        live = [stamp]
+        # The source stays on the line with its figures (H15).
         if wind is not None:
-            live += [_category_name(category), _wind(wind)]
+            live = [(stamp, INK, False), ("  ·  ", FAINT, False),
+                    (f"{_category_name(category)}  ·  {_wind(wind)}", INK, True),
+                    ("  ·  IBTrACS", FAINT, False)]
         else:
-            live.append("position from GDACS, no wind yet")
+            live = [(stamp, INK, False),
+                    ("  ·  position from GDACS, no wind yet", FAINT, False)]
         hud = Image.new("RGBA", (W, 60), (0, 0, 0, 0))
-        text(hud, (MARGIN, 42), "  ·  ".join(live), 26, INK, bold=True)
+        rich(hud, (MARGIN, 42), live, 26)
         paste(frame, hud, W / 2, 1236 - 12 + dy, alpha)
 
 
 class PointScene(Scene):
-    """An event at one point: earthquake, eruption, flood or fire."""
+    """An event at one point: earthquake, eruption, flood or fire.
+
+    Each has its own animated glyph, and the figure a reader looks for first
+    is written beside it on the map, with its source.
+    """
+
+    SHOCK_START, SHOCK_PERIOD = 0.45, 1.9
+    # Distance from the event point to its callout, by glyph size.
+    CALLOUT_GAP = {"EQ": 40, "VO": 44, "WF": 30}
 
     def __init__(self, event: dict, regions: dict, anchor: float):
         self.event, self.chapter = event, None
-        kind = event["event_type"]
+        self.kind = kind = event["event_type"]
         # A cyclone lands here only when it has no usable track.
-        self.duration = min(SCENE_SECONDS[kind], 5.0)
+        self.duration = SCENE_SECONDS[kind] if kind != "TC" else 7.0
         self.colour = carto.PERIL_COLOURS[PERIL_KEY[kind]]
         self.lon, self.lat = near(event["lon"], anchor), event["lat"]
         self.view = point_view(self.lon, self.lat, POINT_WIDTH_KM.get(kind, 1200))
@@ -1446,13 +1706,18 @@ class PointScene(Scene):
             self.reach = float(np.clip(60 + 38 * (magnitude - 5), 50, 200))
         else:
             self.reach = {"Red": 150, "Orange": 115}.get(event["alert_level"], 85)
-        avoid = [(self.x - self.reach * 0.6, self.y - self.reach * 0.6,
-                  self.x + self.reach * 0.6, self.y + self.reach * 0.6)]
-        self.names = place_names(self.view, avoid, cities=6, countries=3,
-                                 seas=1 if kind in ("EQ", "VO") else 0)
-        self.shape = "triangle" if kind == "VO" else "disc"
 
         title, place = _where(event, regions)
+        self.callout, box = self._callout(place)
+        avoid = [(self.x - self.reach * 0.6, self.y - self.reach * 0.6,
+                  self.x + self.reach * 0.6, self.y + self.reach * 0.6)]
+        if kind == "VO":                          # the plume drifts up and right
+            avoid.append((self.x - 40, self.y - 90, self.x + 70, self.y + 20))
+        if box:
+            avoid.append(box)
+        self.names = place_names(self.view, avoid, cities=6, countries=3,
+                                 seas=1 if kind in ("EQ", "VO") else 0)
+
         fact = report._digest_fact(event)
         where = " · ".join(p for p in (place, report._digest_dates(event)) if p)
         # A flood's GDACS point is the centroid of the basin that raised the
@@ -1461,25 +1726,86 @@ class PointScene(Scene):
         note = ("The marker is the GDACS alert point, not the flooded area."
                 if kind == "FL" else "")
         self.card = card(natcat.GDACS_PERILS[kind], _alert(event), title,
-                         [(where, 30), (f"{fact} · GDACS" if fact else "", 26)],
+                         [(where, 30),
+                          (f"{emphasise(fact)} · GDACS" if fact else "", 26)],
                          self.colour, note)
+
+    def _callout(self, place: str) -> tuple:
+        """The key figure written beside the event, and the box it takes.
+
+        A figure carries its source on the same label (H15). Floods get
+        none: GDACS gives them no figure, and their point is not the flood.
+        """
+        kind, event = self.kind, self.event
+        fact = report._digest_fact(event)
+        lines = None
+        if kind == "EQ" and event.get("severity"):
+            depth = re.search(r"depth (\d+) km", fact)
+            lines = (f"M {float(event['severity']):.1f}",
+                     f"{depth.group(1)} km deep · GDACS" if depth else "GDACS")
+        elif kind == "WF":
+            area = re.search(r"\d[\d,]*\s?ha", fact)
+            lines = (area.group(0), "fire area · GDACS") if area else None
+        elif kind == "VO":
+            lines = (report._event_name(event) or "Volcano", place)
+        if not lines:
+            return Layer(np.zeros((1, 1, 4), np.float32)), None
+
+        gap = self.CALLOUT_GAP[kind]
+        width = max(font(26, True).getlength(lines[0]),
+                    font(17).getlength(lines[1] or "")) + 6
+        right = self.x + gap + width < W - MARGIN / 2
+        x = self.x + gap if right else self.x - gap
+        anchor = "ls" if right else "rs"
+        image = blank()
+        text(image, (x, self.y - 2), lines[0], 26, INK, bold=True, anchor=anchor,
+             halo="#FFFFFF")
+        if lines[1]:
+            text(image, (x, self.y + 20), lines[1], 17, INK, anchor=anchor,
+                 halo="#FFFFFF")
+        left = x if right else x - width
+        return Layer(np.asarray(image)), (left, self.y - 26, left + width, self.y + 26)
+
+    def _shock(self, t: float) -> float:
+        if t < self.SHOCK_START:
+            return 0.0
+        return math.exp(-2.8 * ((t - self.SHOCK_START) % self.SHOCK_PERIOD))
 
     def map(self, t: float) -> np.ndarray:
         frame = self.base.copy()
         self.names.over(frame, ramp(t, 0.3, 1.1))
-        period = 1.7
-        for k in range(3):
-            phase = (t - 0.4 - k * period / 3) / period
-            if phase < 0:
-                continue
-            phase %= 1.0
-            ring(frame, self.x, self.y, self.reach * phase, 3.0, self.colour,
-                 0.85 * (1 - phase) ** 1.3 * ramp(t, 0.4, 0.8))
-        grow = ramp(t, 0.15, 0.45)
-        if grow > 0:
-            size = int(34 * (0.6 + 0.4 * grow)) // 2 * 2
-            paste(frame, marker(self.colour, None, size, self.shape),
-                  self.x, self.y, grow)
+        appear = ramp(t, 0.15, 0.5)
+        kind, x, y = self.kind, self.x, self.y
+
+        if kind == "EQ":
+            # Two wavefronts per shock, the second a beat behind: P and S.
+            latest = int((t - self.SHOCK_START) // self.SHOCK_PERIOD)
+            for k in (latest - 1, latest):
+                for delay in (0.0, 0.25):
+                    age = (t - self.SHOCK_START - k * self.SHOCK_PERIOD - delay) / 1.6
+                    if k >= 0 and 0 < age < 1:
+                        ring(frame, x, y, 30 + self.reach * age, 3.0, self.colour,
+                             0.8 * (1 - age) ** 1.2)
+            shock = self._shock(t)
+            stamp(frame, quake_glyph(self.colour, t, shock),
+                  x + 3.2 * shock * math.sin(t * 70), y + 1.8 * shock * math.cos(t * 55),
+                  appear)
+        elif kind == "FL":
+            for offset in (0.0, 1.2):
+                if t > 0.5 + offset:
+                    phase = ((t - 0.5 - offset) / 2.4) % 1.0
+                    ring(frame, x, y, 30 + self.reach * 0.8 * phase, 2.5,
+                         self.colour, 0.55 * (1 - phase) ** 1.3)
+            stamp(frame, flood_glyph(self.colour, t), x, y, appear)
+        elif kind == "VO":
+            stamp(frame, volcano_glyph(self.colour, t), x, y, appear)
+        elif kind == "WF":
+            stamp(frame, fire_glyph(self.colour, t), x, y, appear)
+        else:
+            paste(frame, cyclone_glyph(self.colour).rotate(
+                t * 300.0 * (1 if self.lat >= 0 else -1),
+                resample=Image.Resampling.BICUBIC), x, y, appear)
+        self.callout.over(frame, ramp(t, 0.9, 1.5))
         return frame
 
     def decorate(self, frame: np.ndarray, t: float):
@@ -1610,25 +1936,31 @@ class WorldScene(Scene):
                 ax.plot(mx(lons), my(lats), color=carto.PERIL_COLOURS["storm"],
                         lw=2.4, solid_capstyle="round")
         self.tracks = overlay(view, draw_tracks)
-        self.taken = [(x - 17, y - 17, x + 17, y + 17) for x, y, _, _ in self.markers]
+        self.taken = [(x - 17, y - 17, x + 17, y + 17)
+                      for x, y, _, _ in self.markers] + [OWNER_BOX]
         self.droughts = [self._drought(d, i, view) for i, d in enumerate(droughts)]
         self.duration = (INTRO_SECONDS if not closing else
                          0.6 + DROUGHT_STAGGER * len(self.droughts) + 1.2 + OUTRO_HOLD)
 
         shown = [event for event, _ in events]
-        perils = []
+        perils = {}
         for event in shown + droughts:
-            name = natcat.GDACS_PERILS[event["event_type"]]
-            if name not in perils:
-                perils.append(name)
+            perils.setdefault(natcat.GDACS_PERILS[event["event_type"]],
+                              carto.PERIL_COLOURS[PERIL_KEY[event["event_type"]]])
         if closing:
-            lines = [(f"{len(shown)} event{'s' if len(shown) != 1 else ''}"
-                      + (f" and {len(droughts)} drought alert"
-                         f"{'s' if len(droughts) != 1 else ''}" if droughts else ""),
-                      30),
-                     (" · ".join(perils), 26)]
-            self.card = card("The week", None, "Natural catastrophes", lines,
-                             INK)
+            count = f"**{len(shown)} event{'s' if len(shown) != 1 else ''}**"
+            if droughts:
+                count += (f" and **{len(droughts)} drought alert"
+                          f"{'s' if len(droughts) != 1 else ''}**")
+            # Each peril in its own colour, the colour its marker carried: the
+            # line doubles as the legend of the map above it.
+            legend = []
+            for i, (name, colour) in enumerate(perils.items()):
+                if i:
+                    legend.append(("  ·  ", FAINT, False))
+                legend.append((name, colour, True))
+            self.card = card("The week", None, "Natural catastrophes",
+                             [(count, 30), (legend, 26)], INK)
         else:
             self.card = card("This week", None, "Natural catastrophes",
                              [(report._date_span(start, end), 30),
@@ -1695,6 +2027,9 @@ class WorldScene(Scene):
     def map(self, t: float) -> np.ndarray:
         frame = self.base.copy()
         if self.closing:
+            # Every fill and border first, every label after: a country in two
+            # alerts is filled twice, and the second fill used to cover the
+            # first alert's label.
             for d in self.droughts:
                 s = t - d["start"]
                 if s <= 0:
@@ -1704,7 +2039,8 @@ class WorldScene(Scene):
                     reach = ramp(s, 0.0, 0.9) * 1.02
                     d["edge"].over(frame, 1.0,
                                    mask=np.clip((reach - d["sweep"]) * 40, 0, 1))
-                d["label"].over(frame, ramp(s, 0.9, 1.3))
+            for d in self.droughts:
+                d["label"].over(frame, ramp(t - d["start"], 0.9, 1.3))
             self.tracks.over(frame)
             for x, y, colour, number in self.markers:
                 paste(frame, marker(colour, number, 30), x, y)
@@ -1761,14 +2097,14 @@ class EndCard:
 
     def __init__(self, start: date, end: date, credits: list, leaving: np.ndarray):
         image = Image.new("RGBA", (W, H), _rgba(carto.THEME["background"]))
-        mark = brand(250)
+        mark = brand(290)
         image.alpha_composite(mark, dest=((W - mark.width) // 2, 250))
-        text(image, (W / 2, 610), "WEEKLY REPORT", 26, FAINT, bold=True, anchor="ms")
-        text(image, (W / 2, 668), report._date_span(start, end), 40, INK,
+        text(image, (W / 2, 665), "WEEKLY REPORT", 28, FAINT, bold=True, anchor="ms")
+        text(image, (W / 2, 730), report._date_span(start, end), 46, INK,
              bold=True, anchor="ms")
-        text(image, (W / 2, 716), "Ilyas Hammouti", 26, INK, anchor="ms")
+        text(image, (W / 2, 785), OWNER, 28, INK, anchor="ms")
 
-        y = 900
+        y = 980
         locked = report.locked_phrases()
         lines = [locked["L-SRC-GDACS"]] + credits
         for block, size, colour in ((" ".join(lines), 21, FAINT),
@@ -1930,18 +2266,23 @@ def render(monday, picks_path=None) -> dict:
     # still LinkedIn shows before the video plays.
     outro = plan["outro"]
     cover = outro.last()
-    outro.decorate(cover, outro.duration - 0.01)
     frame_chrome.over(cover)
+    outro.decorate(cover, outro.duration - 0.01)
     Image.fromarray((np.clip(cover, 0, 1) * 255 + 0.5).astype(np.uint8)).save(paths["cover"])
     timeline.append(EndCard(plan["start"], plan["end"], plan["credits"], cover))
 
     encoder = Encoder(paths["video"])
     try:
+        # Map, then the chrome, then the card: the card's text belongs on top
+        # of the fixed paper band.
         for item in timeline:
             dress = not isinstance(item, EndCard)
-            for frame in item.frames():
+            decorate = getattr(item, "decorate", None)
+            for i, frame in enumerate(item.frames()):
                 if dress:
                     frame_chrome.over(frame)
+                    if decorate:
+                        decorate(frame, i / FPS)
                     strips[item.chapter].over(frame)
                 encoder.write(frame)
     finally:

@@ -39,10 +39,15 @@ world again with the droughts filled in.
 | Peril | On screen |
 |---|---|
 | Tropical cyclone | Its track through the week draws itself, dated each midnight UTC, with category and wind from IBTrACS as it goes |
-| Earthquake | The epicentre, pulsing; the pulse scales with magnitude |
-| Volcano | The volcano, pulsing |
-| Flood, wildfire | The GDACS point, pulsing. Never an area: no extent exists on a Monday |
+| Earthquake | A seismograph badge that jolts at each shock, with wavefronts sized by magnitude; magnitude and depth written beside it |
+| Volcano | A cone with a drifting ash plume and sparks; its name written beside it |
+| Wildfire | A flickering flame at the GDACS point; the fire area written beside it |
+| Flood | Running water in a badge at the GDACS point, with ripples. Never an area: no extent exists on a Monday |
 | Drought | No scene. Its countries fill in on the closing world view, with the start date |
+
+Any figure written on the map carries its source on the same label (H15).
+The paper bands at the top and bottom never move, card or no card, and the
+owner's mark sits at the bottom right of the map.
 
 The choice of events is made by hand from a suggested list, to spread the
 video across the world and across the week. A clip may follow any scene, with

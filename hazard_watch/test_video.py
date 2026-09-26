@@ -199,6 +199,31 @@ def test_cyclone_matched_by_name_then_by_position_then_extended():
     assert unnamed["sid"] == "B"
 
 
+def test_marker_numbers_sit_in_the_middle_of_their_disc():
+    """The digits' own ink is centred in the disc, within half a pixel."""
+    for number in range(1, 10):
+        image = np.asarray(video.marker("#1B7F79", number, 30), np.float32)
+        white = (image[..., :3].min(axis=2) > 200) & (image[..., 3] > 200)
+        # Only the digit: the white rim is the outer ring, so keep the inside.
+        yy, xx = np.mgrid[0:30, 0:30]
+        inside = np.hypot(xx - 14.5, yy - 14.5) < 10
+        ys, xs = np.nonzero(white & inside)
+        centre_x = (xs.min() + xs.max()) / 2
+        centre_y = (ys.min() + ys.max()) / 2
+        assert abs(centre_x - 14.5) <= 0.5 and abs(centre_y - 14.5) <= 0.5, \
+            (number, centre_x, centre_y)
+
+
+def test_figures_in_a_card_line_are_set_bold():
+    line = video.emphasise("Forest fire over 20,000 ha")
+    assert line == "Forest fire over **20,000 ha**"
+    assert video.emphasise("Magnitude 6.5, depth 98 km") == \
+        "**Magnitude 6.5**, depth **98 km**"
+    assert video.emphasise("since 21 September 2026") == "since 21 September 2026"
+    runs = video.runs("over **20,000 ha**")
+    assert [bold for _, _, bold in runs] == [False, True]
+
+
 def test_layer_composites_premultiplied_and_respects_the_mask():
     frame = np.zeros((4, 4, 3), np.float32)
     rgba = np.zeros((4, 4, 4), np.float32)
