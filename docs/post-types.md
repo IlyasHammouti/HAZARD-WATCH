@@ -36,6 +36,10 @@ The same week, as a video of about a minute (`video.py`). It opens on the
 world with every event marked, flies to each in turn, and closes on the
 world again with the droughts filled in.
 
+Each hazard's badge is the logo's own corner-bracket "viseur" (viewfinder)
+closing on the event, built and animated from artwork at
+`brand/hazard-icons/viseur-v2/` rather than drawn in code.
+
 | Peril | On screen |
 |---|---|
 | Tropical cyclone | Its track through the week draws itself, dated each midnight UTC, with category and wind from IBTrACS as it goes |

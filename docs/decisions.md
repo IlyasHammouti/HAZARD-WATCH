@@ -485,15 +485,34 @@ One portability fix along the way: `anullsrc`'s own `d=` duration option
 does not exist on this machine's ffmpeg (4.3.1) — `-t` on the input works on
 every version and was used instead.
 
-**Deferred: hazard icons.** The point-scene glyphs (seismograph, eruption,
+**Hazard icons, built 28 September 2026.** The hand-drawn point-scene glyphs
+(seismograph, eruption, flame, running water) shipped 26 September 2026 read
+as placeholder-quality. Handed a design brief to Claude in a conversational
+design session instead of iterating on them blind; it came back with a
+"viseur" (viewfinder) badge per hazard — the logo's own corner-bracket motif
+closing on the event like a camera focusing — plus, in `badges-viseur.js`,
+the exact motion spec: which named layer moves, by how much, over what
+period. Nine SVGs (`brand/hazard-icons/viseur-v2/`, one per hazard plus
+`cyclone-sud.svg` — a genuinely different asset, not a mirror, because a
+mirrored spiral does not curl the way a real southern-hemisphere storm does),
+each built as a static frame (`cadre`) plus 1-3 named parts (`trace`, `bras`
++ `oeil`, `cone` + `panache` + `ejectas`, `corps` + `coeur` + `etincelles`,
+`vagues` + `gouttes`).
 
-**Deferred: hazard icons.** The point-scene glyphs (seismograph, eruption,
-flame, running water) shipped 26 September 2026 as a first pass and read as
-placeholder-quality, not brand-quality. Rather than iterate on them blind,
-the plan is to hand a design brief to Claude in a **conversational** session
-(the point of that surface is back-and-forth refinement against the actual
-`carto.py` palette and the rendered stills, not a single one-shot prompt) and
-bring back whatever it produces as SVG/PNG assets for `video.py` to animate.
+Every `<g id>` is rasterised once, ahead of time, into its own registered PNG
+(`layers/<hazard>-<part>.png`, via `cairosvg`, one script run, not part of
+the render path — a browser round-trip was the first plan, tried and
+dropped: this pipeline already runs matplotlib and ffmpeg headless, and nothing
+else in it needs a browser). `video.py`'s five animated glyph functions
+(`cyclone_glyph`, `quake_glyph`, `volcano_glyph`, `fire_glyph`,
+`flood_glyph`) composite these layers with plain PIL transforms — translate,
+scale, skew, rotate, fade — driven by the timings in `badges-viseur.js`'s
+own CSS (`_loop` for its `alternate` keyframes, `_rise` for its rise/fall
+ones), so the motion matches what the design session specified without
+having its actual animation runtime (a browser) inside a video pipeline that
+never otherwise needs one. Tsunami, drought and landslide badges are
+rasterised too, for whenever those hazards get a scene, but nothing in
+`video.py` uses them yet — they cost nothing to have ready.
 
 ### Urban under-detection — measured, and the three-level response
 

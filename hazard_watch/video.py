@@ -51,7 +51,7 @@ matplotlib.use("Agg")
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 import carto
 import natcat
@@ -961,193 +961,145 @@ def day_dot(size: int = 14) -> Image.Image:
     return image.resize((size, size), Image.Resampling.LANCZOS)
 
 
+# Hazard badges — brand/hazard-icons/viseur-v2/. Design and motion spec are
+# the design tool's own badges-viseur.js and the animation CSS in
+# "Badges aléas - Viseur.html": each badge is a fixed viewfinder frame
+# (`cadre`) plus 1-3 named parts, one <g id> per part, pre-rasterised once
+# (see brand/hazard-icons/viseur-v2/layers/) so runtime never touches SVG.
+# The motion below reproduces that CSS: same keyframe shapes and periods,
+# ported to a per-frame position/scale because this pipeline has no live
+# animation engine to hand the CSS to.
+ICON_DIR = (Path(__file__).resolve().parent.parent / "brand"
+           / "hazard-icons" / "viseur-v2" / "layers")
+
+
 @lru_cache(maxsize=None)
-def cyclone_glyph(colour: str, size: int = 46) -> Image.Image:
-    """The cyclone symbol: an eye and two trailing arms."""
-    big = size * 4
-    image = Image.new("RGBA", (big, big), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    c = big / 2
-    for base in (0.0, math.pi):
-        theta = np.linspace(0, 1.25 * math.pi, 40)
-        radius = big * (0.16 + 0.25 * theta / (1.25 * math.pi))
-        points = [(c + r * math.cos(t + base), c - r * math.sin(t + base))
-                  for t, r in zip(theta, radius)]
-        draw.line(points, fill=_rgba("#FFFFFF"), width=int(big * 0.17), joint="curve")
-        draw.line(points, fill=_rgba(colour), width=int(big * 0.09), joint="curve")
-    draw.ellipse((c - big * 0.2, c - big * 0.2, c + big * 0.2, c + big * 0.2),
-                 fill=_rgba("#FFFFFF"))
-    draw.ellipse((c - big * 0.13, c - big * 0.13, c + big * 0.13, c + big * 0.13),
-                 fill=_rgba(colour))
-    return image.resize((size, size), Image.Resampling.LANCZOS)
+def icon_layer(hazard: str, layer: str, size: int) -> Image.Image:
+    """One named part of a hazard badge, resized to `size`.
+
+    Every part of one hazard was rasterised from the same 100x100 viewBox at
+    the same output size, so they stay pixel-registered without any of them
+    carrying its own offset.
+    """
+    path = ICON_DIR / f"{hazard}-{layer}.png"
+    return Image.open(path).convert("RGBA").resize((size, size), Image.Resampling.LANCZOS)
 
 
-class Sprite:
-    """A small premultiplied RGBA drawing, made three times too large and
-    averaged down, which is what gives the animated glyphs clean edges.
-    Coordinates are in the sprite's own pixels."""
-
-    SS = 3
-
-    def __init__(self, size: int):
-        self.size, self.big = size, size * self.SS
-        self.rgba = np.zeros((self.big, self.big, 4), np.float32)
-
-    def _over(self, alpha: np.ndarray, box: tuple, colour, strength: float):
-        y0, y1, x0, x1 = box
-        a = (alpha * strength)[..., None]
-        region = self.rgba[y0:y1, x0:x1]
-        region *= 1 - a
-        region[..., :3] += rgb(colour) * a
-        region[..., 3:] += a
-
-    def disc(self, x, y, r, colour, strength: float = 1.0, soft: float = 1.0):
-        if strength <= 0.002:
-            return
-        s = self.SS
-        cx, cy, radius, edge = x * s, y * s, r * s, max(soft * s, 1.0)
-        reach = radius + edge + 1
-        x0, x1 = max(0, int(cx - reach)), min(self.big, int(cx + reach) + 1)
-        y0, y1 = max(0, int(cy - reach)), min(self.big, int(cy + reach) + 1)
-        if x1 <= x0 or y1 <= y0:
-            return
-        yy, xx = np.mgrid[y0:y1, x0:x1]
-        d = np.hypot(xx + 0.5 - cx, yy + 0.5 - cy)
-        self._over(np.clip((radius - d) / edge + 0.5, 0, 1).astype(np.float32),
-                   (y0, y1, x0, x1), colour, strength)
-
-    def _shape(self, draw, colour, strength: float):
-        if strength <= 0.002:
-            return
-        mask = Image.new("L", (self.big, self.big), 0)
-        draw(ImageDraw.Draw(mask), self.SS)
-        self._over(np.asarray(mask, np.float32) / 255,
-                   (0, self.big, 0, self.big), colour, strength)
-
-    def polygon(self, points, colour, strength: float = 1.0):
-        self._shape(lambda d, s: d.polygon([(x * s, y * s) for x, y in points],
-                                           fill=255), colour, strength)
-
-    def line(self, points, width: float, colour, strength: float = 1.0):
-        def draw(d, s):
-            scaled = [(x * s, y * s) for x, y in points]
-            d.line(scaled, fill=255, width=max(1, round(width * s)), joint="curve")
-            r = width * s / 2
-            for px, py in (scaled[0], scaled[-1]):
-                d.ellipse((px - r, py - r, px + r, py + r), fill=255)
-        self._shape(draw, colour, strength)
-
-    def done(self) -> np.ndarray:
-        s = self.SS
-        return self.rgba.reshape(self.size, s, self.size, s, 4).mean(axis=(1, 3))
+def _badge(hazard: str, size: int) -> Image.Image:
+    """A blank canvas with that hazard's static frame already on it."""
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    canvas.alpha_composite(icon_layer(hazard, "cadre", size))
+    return canvas
 
 
-def stamp(frame: np.ndarray, sprite: np.ndarray, x: float, y: float,
-          alpha: float = 1.0):
-    """Composite a premultiplied sprite onto the frame, centred on (x, y)."""
-    if alpha <= 0.002:
+def _place(base: Image.Image, layer: Image.Image, dx: float = 0.0, dy: float = 0.0,
+          sx: float = 1.0, sy: float = 1.0, angle: float = 0.0, skew: float = 0.0,
+          alpha: float = 1.0, anchor: tuple = (0.5, 0.5)):
+    """Composite `layer` onto `base`: scale and skew about `anchor` (a
+    fraction of the layer's own size — (.5, 1) is CSS's "bottom center"),
+    then rotate about the centre, then offset by (dx, dy). Order matches
+    what the CSS `transform` shorthand does.
+    """
+    if alpha <= 0.003:
         return
-    h, w = sprite.shape[:2]
-    left, top = int(round(x - w / 2)), int(round(y - h / 2))
-    a0, a1 = max(0, -top), min(h, frame.shape[0] - top)
-    b0, b1 = max(0, -left), min(w, frame.shape[1] - left)
-    if a1 <= a0 or b1 <= b0:
-        return
-    piece = sprite[a0:a1, b0:b1]
-    region = frame[top + a0:top + a1, left + b0:left + b1]
-    region *= 1 - piece[..., 3:] * alpha
-    region += piece[..., :3] * alpha
+    w, h = layer.size
+    if sx != 1.0 or sy != 1.0:
+        layer = layer.resize((max(1, round(w * sx)), max(1, round(h * sy))),
+                             Image.Resampling.LANCZOS)
+    if skew:
+        layer = layer.transform(layer.size, Image.Transform.AFFINE,
+                                (1, math.tan(math.radians(skew)), 0, 0, 1, 0),
+                                resample=Image.Resampling.BICUBIC)
+    if angle:
+        layer = layer.rotate(angle, resample=Image.Resampling.BICUBIC, expand=True)
+    if alpha < 0.999:
+        layer = layer.copy()
+        layer.putalpha(layer.getchannel("A").point(lambda v: round(v * alpha)))
+    ax, ay = anchor
+    left = round(w * ax + dx - layer.width * ax)
+    top = round(h * ay + dy - layer.height * ay)
+    base.alpha_composite(layer, (left, top))
 
 
-def _badge(sprite: Sprite, c: float, colour: str):
-    """White disc with a ring in the peril's colour, and a white rim."""
-    sprite.disc(c, c, 28.5, "#FFFFFF")
-    sprite.disc(c, c, 27, colour)
-    sprite.disc(c, c, 23.5, "#FFFFFF")
+def _loop(t: float, period: float) -> float:
+    """0 to 1 to 0, smoothly, over `period` seconds — CSS's `alternate`."""
+    return 0.5 - 0.5 * math.cos(2 * math.pi * t / period)
 
 
-def quake_glyph(colour: str, t: float, shock: float) -> np.ndarray:
-    """A seismograph trace that jumps at every shock."""
-    sprite, c = Sprite(72), 36
-    _badge(sprite, c, colour)
-    xs = np.linspace(-19, 19, 70)
-    envelope = np.exp(-(xs / 9.5) ** 2)
-    amplitude = 2.5 + 9.5 * shock
-    ys = amplitude * envelope * (np.sin(xs * 1.05 - t * 16)
-                                 + 0.35 * np.sin(xs * 2.3 + t * 9))
-    sprite.line(list(zip(c + xs, c + ys)), 2.4, colour)
-    return sprite.done()
+def _rise(t: float, period: float, start: float, end: float, turn: float) -> tuple:
+    """`(dy, alpha)` for a particle that rises (or falls) and fades: the
+    design's own `rise` / `fall` keyframe. Fades in over the first `turn` of
+    the loop, out over the rest; position moves from `start` to `end` evenly
+    across the whole loop, `turn` included.
+    """
+    phase = (t % period) / period
+    dy = start + (end - start) * phase
+    alpha = phase / turn if phase < turn else 1 - (phase - turn) / (1 - turn)
+    return dy, max(0.0, min(1.0, alpha))
 
 
-def flood_glyph(colour: str, t: float) -> np.ndarray:
-    """Three lines of water, running."""
-    sprite, c = Sprite(72), 36
-    _badge(sprite, c, colour)
-    xs = np.linspace(-17, 17, 50)
-    for i, dy in enumerate((-8, 0, 8)):
-        ys = c + dy + 2.8 * np.sin(xs * 0.42 + t * 5.5 + i * 1.1)
-        sprite.line(list(zip(c + xs, ys)), 2.6, colour, 1.0 - 0.18 * i)
-    return sprite.done()
+def cyclone_glyph(t: float, hemisphere: float, size: int = 46) -> Image.Image:
+    """The cyclone badge: frame and eye fixed, the arm turning around it —
+    anticlockwise north, clockwise south, 360 deg / 5 s either way.
+
+    The southern badge is its own artwork, not a mirror of the northern one:
+    a mirrored spiral does not curl the way a real southern-hemisphere storm
+    does.
+    """
+    hazard = "cyclone" if hemisphere >= 0 else "cyclone-sud"
+    canvas = _badge(hazard, size)
+    angle = (t * 360.0 / 5.0) * (1 if hemisphere >= 0 else -1)
+    _place(canvas, icon_layer(hazard, "bras", size), angle=angle)
+    canvas.alpha_composite(icon_layer(hazard, "oeil", size))
+    return canvas
 
 
-def volcano_glyph(colour: str, t: float) -> np.ndarray:
-    """A cone with an ash plume drifting off it and sparks from the crater."""
-    sprite, c = Sprite(150), 75
-    top, base = c - 8, c + 16
-    rising = ramp(t, 0.3, 1.0)
-    for k in range(12):
-        age = (t * 0.45 + k / 12) % 1.0
-        shade = 0.40 + 0.30 * age
-        sprite.disc(c + 26 * age ** 1.6 + 3 * math.sin(k * 2.1 + t * 1.5),
-                    top - 4 - 58 * age, 4 + 14 * age, (shade, shade, shade + 0.02),
-                    0.8 * (1 - age) ** 1.2 * rising, soft=2.5)
-    sprite.polygon([(c - 33, base + 2.5), (c - 9.5, top - 2.5),
-                    (c + 9.5, top - 2.5), (c + 33, base + 2.5)], "#FFFFFF")
-    sprite.polygon([(c - 30, base), (c - 8, top), (c + 8, top), (c + 30, base)],
-                   colour)
-    sprite.disc(c, top + 1, 6.5, "#FF7A1A", 0.6 + 0.4 * math.sin(t * 5.0) ** 2,
-                soft=1.5)
-    for k in range(6):
-        age = (t * 1.1 + k / 6) % 1.0
-        sprite.disc(c + (k - 2.5) * 7 * age, top - 30 * age + 38 * age * age,
-                    1.9, "#FFB23B", (1 - age) * rising, soft=0.8)
-    return sprite.done()
+def quake_glyph(t: float, shock: float, size: int = 72) -> Image.Image:
+    """A seismograph trace, scaled vertically between 0.45x and 1.15x about
+    its centre at every shock — the design's own `amp` keyframe."""
+    canvas = _badge("seisme", size)
+    _place(canvas, icon_layer("seisme", "trace", size),
+          sy=0.45 + 0.70 * max(0.0, min(1.0, shock)))
+    return canvas
 
 
-def _flame(cx: float, base: float, height: float, w: float, sway: float) -> list:
-    """A flame outline: round at the bottom, drawn to a swaying tip."""
-    theta = np.linspace(np.pi, 2 * np.pi, 16)
-    arc = list(zip(cx + w * np.cos(theta), base - w - w * np.sin(theta)))
-    tip = np.array((cx + sway, base - height))
-
-    def curve(p0, p1, p2, n=14):
-        u = np.linspace(0, 1, n)[:, None]
-        return [tuple(p) for p in (1 - u) ** 2 * np.array(p0)
-                + 2 * (1 - u) * u * np.array(p1) + u ** 2 * np.array(p2)]
-
-    shoulder = base - w - (height - w) * 0.6
-    right = curve((cx + w, base - w), (cx + w * 0.95 + sway * 0.2, shoulder), tip)
-    left = curve(tip, (cx - w * 0.95 + sway * 0.2, shoulder), (cx - w, base - w))
-    return arc + right[1:] + left[1:]
+def volcano_glyph(t: float, size: int = 150) -> Image.Image:
+    """A cone, a plume drifting up-right off its own bottom-left corner, and
+    ejecta rising and fading from the crater on a faster loop."""
+    canvas = _badge("volcan", size)
+    canvas.alpha_composite(icon_layer("volcan", "cone", size))
+    drift = _loop(t, 3.0)
+    _place(canvas, icon_layer("volcan", "panache", size), dx=3 * drift, dy=-4 * drift,
+          sx=1 + 0.12 * drift, sy=1 + 0.12 * drift, anchor=(0.0, 1.0))
+    dy, alpha = _rise(t, 1.3, start=4, end=-8, turn=0.3)
+    _place(canvas, icon_layer("volcan", "ejectas", size), dy=dy, alpha=alpha)
+    return canvas
 
 
-def fire_glyph(colour: str, t: float) -> np.ndarray:
-    """A flickering flame with embers rising off it."""
-    sprite, c = Sprite(110), 55
-    base = c + 20
-    flicker = 1 + 0.10 * math.sin(t * 11) + 0.06 * math.sin(t * 23 + 1.3)
-    sway = 3.5 * math.sin(t * 6) + 1.5 * math.sin(t * 13)
-    sprite.disc(c, base - 16, 30, "#FF8A2A", 0.16 + 0.04 * math.sin(t * 9), soft=14)
-    sprite.polygon(_flame(c, base + 2.5, 46 * flicker + 5, 16.5, sway), "#FFFFFF")
-    sprite.polygon(_flame(c, base, 46 * flicker, 14, sway), colour)
-    sprite.polygon(_flame(c, base - 1, 33 * flicker, 9.5, sway * 0.8), "#F08A24")
-    sprite.polygon(_flame(c, base - 2, 20 * flicker, 5.5, sway * 0.6), "#FFD34D")
-    rising = ramp(t, 0.3, 0.8)
-    for k in range(7):
-        age = (t * 0.7 + k / 7) % 1.0
-        sprite.disc(c + (k - 3) * 4 + 7 * math.sin(age * 6 + k), base - 22 - 50 * age,
-                    1.7 * (1 - age) + 0.6, "#FFB23B", (1 - age) * rising, soft=0.8)
-    return sprite.done()
+def fire_glyph(t: float, size: int = 110) -> Image.Image:
+    """A flame swaying from its base, an inner flicker out of phase with it,
+    and embers rising and fading off the top."""
+    canvas = _badge("feu", size)
+    sway = _loop(t, 1.1)
+    _place(canvas, icon_layer("feu", "corps", size), sy=1 + 0.06 * sway,
+          skew=-3 * sway, anchor=(0.5, 1.0))
+    flick = _loop(t, 0.45)
+    _place(canvas, icon_layer("feu", "coeur", size), sx=1 - 0.14 * flick,
+          sy=1 - 0.07 * flick, anchor=(0.5, 1.0))
+    dy, alpha = _rise(t, 1.6, start=4, end=-8, turn=0.3)
+    _place(canvas, icon_layer("feu", "etincelles", size), dy=dy, alpha=alpha)
+    return canvas
+
+
+def flood_glyph(t: float, size: int = 72) -> Image.Image:
+    """Two wave lines running in place, droplets falling and fading above
+    them."""
+    canvas = _badge("inondation", size)
+    _place(canvas, icon_layer("inondation", "vagues", size),
+          dx=-3.75 + 7.5 * _loop(t, 3.2))
+    dy, alpha = _rise(t, 1.3, start=-4, end=6, turn=0.25)
+    _place(canvas, icon_layer("inondation", "gouttes", size), dy=dy, alpha=alpha)
+    return canvas
 
 
 class Source:
@@ -1686,12 +1638,7 @@ class TrackScene(Scene):
             tick.over(frame, min(1.0, max(0.0, (now - hour) / 4 + 1)))
         x = float(np.interp(now, self.times, self.xs))
         y = float(np.interp(now, self.times, self.ys))
-        spin = (t * 300.0) * self.hemisphere
-        glyph = cyclone_glyph(self.colour)
-        if self.hemisphere < 0:
-            glyph = ImageOps.mirror(glyph)
-        paste(frame, glyph.rotate(spin, resample=Image.Resampling.BICUBIC),
-              x, y, ramp(t, 0.2, 0.6))
+        paste(frame, cyclone_glyph(t, self.hemisphere), x, y, ramp(t, 0.2, 0.6))
         return frame
 
     def decorate(self, frame: np.ndarray, t: float):
@@ -1826,24 +1773,22 @@ class PointScene(Scene):
                         ring(frame, x, y, 30 + self.reach * age, 3.0, self.colour,
                              0.8 * (1 - age) ** 1.2)
             shock = self._shock(t)
-            stamp(frame, quake_glyph(self.colour, t, shock),
-                  x + 3.2 * shock * math.sin(t * 70), y + 1.8 * shock * math.cos(t * 55),
-                  appear)
+            paste(frame, quake_glyph(t, shock),
+                 x + 3.2 * shock * math.sin(t * 70), y + 1.8 * shock * math.cos(t * 55),
+                 appear)
         elif kind == "FL":
             for offset in (0.0, 1.2):
                 if t > 0.5 + offset:
                     phase = ((t - 0.5 - offset) / 2.4) % 1.0
                     ring(frame, x, y, 30 + self.reach * 0.8 * phase, 2.5,
                          self.colour, 0.55 * (1 - phase) ** 1.3)
-            stamp(frame, flood_glyph(self.colour, t), x, y, appear)
+            paste(frame, flood_glyph(t), x, y, appear)
         elif kind == "VO":
-            stamp(frame, volcano_glyph(self.colour, t), x, y, appear)
+            paste(frame, volcano_glyph(t), x, y, appear)
         elif kind == "WF":
-            stamp(frame, fire_glyph(self.colour, t), x, y, appear)
+            paste(frame, fire_glyph(t), x, y, appear)
         else:
-            paste(frame, cyclone_glyph(self.colour).rotate(
-                t * 300.0 * (1 if self.lat >= 0 else -1),
-                resample=Image.Resampling.BICUBIC), x, y, appear)
+            paste(frame, cyclone_glyph(t, self.lat), x, y, appear)
         self.callout.over(frame, ramp(t, 0.9, 1.5))
         return frame
 

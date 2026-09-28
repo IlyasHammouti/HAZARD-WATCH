@@ -105,6 +105,7 @@ notebooks/
   exploration/         first version (2023 Emilia-Romagna and 2026 Latvia floods),
                        kept as history; superseded by the pipeline
 brand/                 logo and banner assets, and the script that renders them
+  hazard-icons/viseur-v2/      one SVG per hazard badge, plus rasterised layers/ for video.py
 ```
 
 Generated data and outputs (`hazard_watch/data/`, `hazard_watch/output/`) are
