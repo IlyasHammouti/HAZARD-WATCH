@@ -7,6 +7,8 @@ the camera, the picks file, the cyclone track matching and the compositing.
 """
 
 import math
+import shutil
+import subprocess
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -280,6 +282,24 @@ def test_wildfire_and_flood_get_only_their_bed():
     for kind, bed in (("WF", "wildfire_crackle.mp3"), ("FL", "flood_water.mp3")):
         cues = video.audio_cues([_point(kind, 4.0)])
         assert [c[0] for c in cues] == [bed]
+
+
+def test_peak_gain_corrects_a_quiet_file_more_than_a_loud_one():
+    """Not an absolute level (ffmpeg's `sine` source isn't full-scale to start
+    with) — just that a file made much quieter needs a much bigger boost than
+    one made much louder, which is the whole point of peak-normalising."""
+    quiet = Path(tempfile.mkdtemp()) / "quiet.wav"
+    loud = Path(tempfile.mkdtemp()) / "loud.wav"
+    ffmpeg = shutil.which("ffmpeg")
+    for path, gain in ((quiet, 0.05), (loud, 6.0)):
+        subprocess.run([ffmpeg, "-y", "-v", "error", "-f", "lavfi", "-i",
+                        f"sine=frequency=440:duration=0.5,volume={gain}",
+                        str(path)], check=True)
+    video._peak_gain_db.cache_clear()
+    quiet_gain = video._peak_gain_db(str(quiet))
+    loud_gain = video._peak_gain_db(str(loud))
+    video._peak_gain_db.cache_clear()
+    assert quiet_gain > loud_gain + 20
 
 
 def test_sound_file_downloads_once_then_reuses_the_cache():

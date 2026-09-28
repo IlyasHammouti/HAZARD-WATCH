@@ -126,7 +126,7 @@ SOUND_SOURCES = {
     "earthquake_rumble.mp3": "https://assets.mixkit.co/active_storage/sfx/1296/1296-preview.mp3",
     "earthquake_shock.mp3": "https://assets.mixkit.co/active_storage/sfx/1686/1686-preview.mp3",
     "cyclone_wind.mp3": "https://assets.mixkit.co/active_storage/sfx/1200/1200-preview.mp3",
-    "wildfire_crackle.mp3": "https://assets.mixkit.co/active_storage/sfx/1329/1329-preview.mp3",
+    "wildfire_crackle.mp3": "https://assets.mixkit.co/active_storage/sfx/1330/1330-preview.mp3",
     "flood_water.mp3": "https://assets.mixkit.co/active_storage/sfx/3126/3126-preview.mp3",
     "volcano_rumble.mp3": "https://assets.mixkit.co/active_storage/sfx/2438/2438-preview.mp3",
     "volcano_burst.mp3": "https://assets.mixkit.co/active_storage/sfx/2449/2449-preview.mp3",
@@ -134,13 +134,16 @@ SOUND_SOURCES = {
 BED_SOUND = {"TC": "cyclone_wind.mp3", "EQ": "earthquake_rumble.mp3",
              "VO": "volcano_rumble.mp3", "FL": "flood_water.mp3",
              "WF": "wildfire_crackle.mp3"}
-# Gains are set by ear, not by a loudness standard: most LinkedIn video plays
-# muted, so this is an enhancement for the minority who unmute, and a manual
-# mix plus a limiter is enough. Revisit only if it actually sounds wrong.
-BED_GAIN = {"TC": 0.32, "EQ": 0.26, "VO": 0.30, "FL": 0.30, "WF": 0.38}
 BED_FADE = 0.6
-ACCENT_GAIN = {"earthquake_shock.mp3": 0.55, "volcano_burst.mp3": 0.6}
-TRANSITION_GAIN, TRANSITION_FADE = 0.5, 0.12
+# Every clip is peak-normalised to the same ceiling rather than mixed by ear
+# (see `_peak_gain_db`): eight sources from eight different recordings are
+# never at the same level to start with, and picking one number per hazard by
+# ear only fixes the clip actually being listened to at the time. Measured
+# 28 September 2026, before normalising: -0.1 dB down to -32.6 dB across the
+# eight files — the wildfire crackle sat at -20.5 dB, inaudible next to
+# anything else in the mix at any gain that didn't also blow out its noise
+# floor once boosted on its own.
+TARGET_PEAK_DB = -3.0
 SOUND_DIR = report.CACHE / "sounds"
 
 VIDEO_DIR = report.OUTPUT / "digests" / "video"
@@ -2290,6 +2293,25 @@ class Encoder:
             raise RuntimeError("ffmpeg failed while encoding the video")
 
 
+@lru_cache(maxsize=None)
+def _peak_gain_db(path: str) -> float:
+    """The gain, in dB, that brings this file's true peak to `TARGET_PEAK_DB`.
+
+    Peak, not mean: a rumble or wind bed carries roughly constant energy, so
+    its mean is close to what it sounds like, but a crackle or a shock is
+    mostly silence between short peaks. Levelling those by their mean would
+    ask for a huge boost and turn up their noise floor with it; matching the
+    peaks they already have does not.
+    """
+    ffmpeg = shutil.which("ffmpeg")
+    result = subprocess.run(
+        [ffmpeg, "-hide_banner", "-i", path, "-af", "volumedetect", "-f", "null", "-"],
+        capture_output=True, text=True)
+    match = re.search(r"max_volume:\s*(-?\d+(?:\.\d+)?) dB", result.stderr)
+    peak = float(match.group(1)) if match else 0.0
+    return TARGET_PEAK_DB - peak
+
+
 def sound_file(name: str) -> Path:
     """A cached local copy of one of `SOUND_SOURCES`, downloading it once."""
     path = SOUND_DIR / name
@@ -2305,33 +2327,32 @@ def sound_file(name: str) -> Path:
 
 
 def audio_cues(timeline: list) -> list:
-    """`(file, start second, trim seconds or None, gain)` for every sound.
+    """`(file, start second, trim seconds or None)` for every sound.
 
     A trimmed cue is a bed under a scene, faded in and out at its edges so the
     hard trim point never clicks. An untrimmed one is a short one-shot
     (a whoosh, a shock, an eruption burst) played to its own natural end,
-    which every source here already does cleanly.
+    which every source here already does cleanly. Level is not decided here:
+    every cue is peak-normalised the same way in `build_audio`.
     """
     cues, t = [], 0.0
     for item in timeline:
         if isinstance(item, Flight):
             trim = max(0.6, min(item.duration - 0.1, 2.6))
-            cues.append(("transition_whoosh.mp3", t, trim, TRANSITION_GAIN))
+            cues.append(("transition_whoosh.mp3", t, trim))
         elif isinstance(item, TrackScene):
-            cues.append(("cyclone_wind.mp3", t, item.duration, BED_GAIN["TC"]))
+            cues.append(("cyclone_wind.mp3", t, item.duration))
         elif isinstance(item, PointScene):
             bed = BED_SOUND.get(item.kind)
             if bed:
-                cues.append((bed, t, item.duration, BED_GAIN[item.kind]))
+                cues.append((bed, t, item.duration))
             if item.kind == "EQ":
                 shock = item.SHOCK_START
                 while shock < item.duration:
-                    cues.append(("earthquake_shock.mp3", t + shock, None,
-                                ACCENT_GAIN["earthquake_shock.mp3"]))
+                    cues.append(("earthquake_shock.mp3", t + shock, None))
                     shock += item.SHOCK_PERIOD
             elif item.kind == "VO":
-                cues.append(("volcano_burst.mp3", t + 0.25, None,
-                            ACCENT_GAIN["volcano_burst.mp3"]))
+                cues.append(("volcano_burst.mp3", t + 0.25, None))
         t += item.duration
     return cues
 
@@ -2352,8 +2373,10 @@ def build_audio(timeline: list, total_duration: float, path: Path):
     # (4.3.1) does not have it.
     inputs, chains, labels = ["-f", "lavfi", "-t", f"{total_duration:.3f}", "-i",
                               "anullsrc=channel_layout=stereo:sample_rate=44100"], [], ["0:a"]
-    for i, (name, start, trim, gain) in enumerate(cues, start=1):
-        inputs += ["-i", str(sound_file(name))]
+    for i, (name, start, trim) in enumerate(cues, start=1):
+        file = str(sound_file(name))
+        inputs += ["-i", file]
+        gain = _peak_gain_db(file)
         steps = ["aformat=sample_rates=44100:channel_layouts=stereo"]
         if trim is not None:
             fade = min(BED_FADE, trim / 2)
@@ -2362,7 +2385,8 @@ def build_audio(timeline: list, total_duration: float, path: Path):
                      f"afade=t=out:st={trim - fade:.3f}:d={fade:.3f}"]
         else:
             steps.append("afade=t=in:st=0:d=0.01")
-        steps += [f"volume={gain}", f"adelay={round(start * 1000)}|{round(start * 1000)}"]
+        steps += [f"volume={gain:.2f}dB",
+                 f"adelay={round(start * 1000)}|{round(start * 1000)}"]
         chains.append(f"[{i}:a]{','.join(steps)}[a{i}]")
         labels.append(f"a{i}")
     mix = "".join(f"[{label}]" for label in labels)

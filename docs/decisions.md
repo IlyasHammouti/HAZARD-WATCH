@@ -450,8 +450,23 @@ trim-and-fade rather than loop-and-splice: `video.build_audio` runs one
 scene's start time (computed by summing durations along the already-built
 timeline), fades a trimmed bed in and out at its cut points, mixes everything
 against a silence bed the exact length of the video, and runs the result
-through `alimiter` as the only clipping guard. No full loudness (EBU R128)
-pass: most LinkedIn video plays muted, so this is an enhancement for the
+through `alimiter` as the only clipping guard.
+
+**Levelling is peak, not mean, and not manual.** First cut set one gain per
+hazard by ear; the wildfire crackle was still inaudible next to everything
+else. Measured: eight source files sit anywhere from -0.1 dB to -32.6 dB
+mean, entirely a property of how each was originally recorded, not of how
+loud the hazard should feel. `video._peak_gain_db` brings every clip's true
+peak to the same -3 dBFS ceiling instead. Peak, not mean, on purpose: a wind
+or rumble bed carries roughly constant energy so its mean is close to what it
+sounds like, but a crackle or a shock is mostly silence between short peaks —
+levelling those by their mean asks for a huge boost and turns up their noise
+floor with it, levelling by the peak they already have does not. The
+original wildfire clip ("Campfire burning crackles", Mixkit id 1329) needed
++17.5 dB by this measure and still sounded thin; swapped for id 1330
+("Campfire crackles"), +6.3 dB, audibly present without the noise floor
+climbing with it. Still no full loudness (EBU R128) pass on the finished
+mix — most LinkedIn video plays muted, so this is an enhancement for the
 minority who unmute, not something worth a second render stage for.
 
 One portability fix along the way: `anullsrc`'s own `d=` duration option
