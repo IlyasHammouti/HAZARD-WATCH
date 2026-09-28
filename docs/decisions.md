@@ -463,11 +463,23 @@ sounds like, but a crackle or a shock is mostly silence between short peaks —
 levelling those by their mean asks for a huge boost and turns up their noise
 floor with it, levelling by the peak they already have does not. The
 original wildfire clip ("Campfire burning crackles", Mixkit id 1329) needed
-+17.5 dB by this measure and still sounded thin; swapped for id 1330
-("Campfire crackles"), +6.3 dB, audibly present without the noise floor
-climbing with it. Still no full loudness (EBU R128) pass on the finished
-mix — most LinkedIn video plays muted, so this is an enhancement for the
-minority who unmute, not something worth a second render stage for.
++17.5 dB by this measure and still sounded thin once mixed — a pop-and-silence
+crackle stays a pop-and-silence crackle no matter how its peaks are matched to
+everything else's. A second campfire clip (id 1330, +6.3 dB) had the same
+problem in a milder form. Settled on "Aggressive fire flame" (id 1333, +5.0
+dB): a fuller, more sustained burn rather than isolated pops, which is what
+actually reads as "wildfire" once it is levelled — the smallest correction of
+the three, and the only one that still sounded like fire once it was applied.
+Still no full loudness (EBU R128) pass on the finished mix — most LinkedIn
+video plays muted, so this is an enhancement for the minority who unmute, not
+something worth a second render stage for.
+
+**The transition sits under the hazard beds on purpose**, at 60 % of their
+target amplitude rather than the same level: `TRANSITION_PEAK_DB =
+TARGET_PEAK_DB + 20*log10(0.6)`, about -7.4 dBFS against -3 dBFS for
+everything else. A whoosh that matched a hazard's own loudness competed with
+whichever hazard it was leaving or arriving at, rather than reading as a
+transition between two things that are each the point.
 
 One portability fix along the way: `anullsrc`'s own `d=` duration option
 does not exist on this machine's ffmpeg (4.3.1) — `-t` on the input works on

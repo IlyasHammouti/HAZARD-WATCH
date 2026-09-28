@@ -296,10 +296,17 @@ def test_peak_gain_corrects_a_quiet_file_more_than_a_loud_one():
                         f"sine=frequency=440:duration=0.5,volume={gain}",
                         str(path)], check=True)
     video._peak_gain_db.cache_clear()
-    quiet_gain = video._peak_gain_db(str(quiet))
-    loud_gain = video._peak_gain_db(str(loud))
+    quiet_gain = video._peak_gain_db(str(quiet), video.TARGET_PEAK_DB)
+    loud_gain = video._peak_gain_db(str(loud), video.TARGET_PEAK_DB)
     video._peak_gain_db.cache_clear()
     assert quiet_gain > loud_gain + 20
+
+
+def test_the_transition_targets_a_quieter_peak_than_a_hazard_bed():
+    assert video._target_peak_db("transition_whoosh.mp3") < video.TARGET_PEAK_DB
+    assert video._target_peak_db("cyclone_wind.mp3") == video.TARGET_PEAK_DB
+    # 60% of amplitude, stated as the ask: -3.0 + 20*log10(0.6).
+    assert abs(video.TRANSITION_PEAK_DB - (video.TARGET_PEAK_DB - 4.437)) < 0.01
 
 
 def test_sound_file_downloads_once_then_reuses_the_cache():

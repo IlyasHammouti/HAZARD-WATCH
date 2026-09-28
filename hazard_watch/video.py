@@ -126,7 +126,7 @@ SOUND_SOURCES = {
     "earthquake_rumble.mp3": "https://assets.mixkit.co/active_storage/sfx/1296/1296-preview.mp3",
     "earthquake_shock.mp3": "https://assets.mixkit.co/active_storage/sfx/1686/1686-preview.mp3",
     "cyclone_wind.mp3": "https://assets.mixkit.co/active_storage/sfx/1200/1200-preview.mp3",
-    "wildfire_crackle.mp3": "https://assets.mixkit.co/active_storage/sfx/1330/1330-preview.mp3",
+    "wildfire_crackle.mp3": "https://assets.mixkit.co/active_storage/sfx/1333/1333-preview.mp3",
     "flood_water.mp3": "https://assets.mixkit.co/active_storage/sfx/3126/3126-preview.mp3",
     "volcano_rumble.mp3": "https://assets.mixkit.co/active_storage/sfx/2438/2438-preview.mp3",
     "volcano_burst.mp3": "https://assets.mixkit.co/active_storage/sfx/2449/2449-preview.mp3",
@@ -144,6 +144,10 @@ BED_FADE = 0.6
 # anything else in the mix at any gain that didn't also blow out its noise
 # floor once boosted on its own.
 TARGET_PEAK_DB = -3.0
+# The transition whoosh sits under the hazard beds, not level with them: 60 %
+# of their target amplitude (a listener's "volume knob" reading, not a dB
+# figure), which is -3.0 + 20*log10(0.6) dB.
+TRANSITION_PEAK_DB = TARGET_PEAK_DB + 20 * math.log10(0.6)
 SOUND_DIR = report.CACHE / "sounds"
 
 VIDEO_DIR = report.OUTPUT / "digests" / "video"
@@ -2293,9 +2297,18 @@ class Encoder:
             raise RuntimeError("ffmpeg failed while encoding the video")
 
 
+def _target_peak_db(name: str) -> float:
+    """The peak, in dB, a cue's sound file should be normalised to.
+
+    The whoosh is the exception, quieter on purpose (see `TRANSITION_PEAK_DB`)
+    so a transition never competes with the hazard it is leaving or arriving.
+    """
+    return TRANSITION_PEAK_DB if name == "transition_whoosh.mp3" else TARGET_PEAK_DB
+
+
 @lru_cache(maxsize=None)
-def _peak_gain_db(path: str) -> float:
-    """The gain, in dB, that brings this file's true peak to `TARGET_PEAK_DB`.
+def _peak_gain_db(path: str, target: float) -> float:
+    """The gain, in dB, that brings this file's true peak to `target`.
 
     Peak, not mean: a rumble or wind bed carries roughly constant energy, so
     its mean is close to what it sounds like, but a crackle or a shock is
@@ -2309,7 +2322,7 @@ def _peak_gain_db(path: str) -> float:
         capture_output=True, text=True)
     match = re.search(r"max_volume:\s*(-?\d+(?:\.\d+)?) dB", result.stderr)
     peak = float(match.group(1)) if match else 0.0
-    return TARGET_PEAK_DB - peak
+    return target - peak
 
 
 def sound_file(name: str) -> Path:
@@ -2376,7 +2389,7 @@ def build_audio(timeline: list, total_duration: float, path: Path):
     for i, (name, start, trim) in enumerate(cues, start=1):
         file = str(sound_file(name))
         inputs += ["-i", file]
-        gain = _peak_gain_db(file)
+        gain = _peak_gain_db(file, _target_peak_db(name))
         steps = ["aformat=sample_rates=44100:channel_layouts=stereo"]
         if trim is not None:
             fade = min(BED_FADE, trim / 2)
