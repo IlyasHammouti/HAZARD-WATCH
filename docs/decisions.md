@@ -433,6 +433,41 @@ hand reconfiguration each week or PyQGIS, a second GIS runtime. kepler.gl /
 deck.gl: a browser runtime for trail rendering at a scale this never reaches.
 Flourish: a hosted service outside the reproducible pipeline.
 
+**Sound, built 28 September 2026.** A whoosh under each camera flight, and a
+bed under each scene matched to its hazard (wind for a cyclone, a low rumble
+for an earthquake with a short shock at every P/S pulse, a crackle for a
+wildfire, running water for a flood, a rumble plus one eruption burst for a
+volcano). Every clip is under the Mixkit Sound Effects Free License
+(https://mixkit.co/license/#sfxFree — commercial use, social media video
+posts, no attribution required — confirmed by reading the licence text
+itself, not a summary page). Fetched once into `data/cache/sounds/` and
+never committed: that licence forbids redistributing an item "on its own...
+with source files," which a public repo shipping the raw clip would be.
+
+Every source clip is already longer than the scene it covers, so mixing is
+trim-and-fade rather than loop-and-splice: `video.build_audio` runs one
+`ffmpeg -filter_complex` pass that positions each clip with `adelay` at its
+scene's start time (computed by summing durations along the already-built
+timeline), fades a trimmed bed in and out at its cut points, mixes everything
+against a silence bed the exact length of the video, and runs the result
+through `alimiter` as the only clipping guard. No full loudness (EBU R128)
+pass: most LinkedIn video plays muted, so this is an enhancement for the
+minority who unmute, not something worth a second render stage for.
+
+One portability fix along the way: `anullsrc`'s own `d=` duration option
+does not exist on this machine's ffmpeg (4.3.1) — `-t` on the input works on
+every version and was used instead.
+
+**Deferred: hazard icons.** The point-scene glyphs (seismograph, eruption,
+
+**Deferred: hazard icons.** The point-scene glyphs (seismograph, eruption,
+flame, running water) shipped 26 September 2026 as a first pass and read as
+placeholder-quality, not brand-quality. Rather than iterate on them blind,
+the plan is to hand a design brief to Claude in a **conversational** session
+(the point of that surface is back-and-forth refinement against the actual
+`carto.py` palette and the rendered stills, not a single one-shot prompt) and
+bring back whatever it produces as SVG/PNG assets for `video.py` to animate.
+
 ### Urban under-detection — measured, and the three-level response
 
 Radar amplitude fails in built-up areas: the double bounce between ground and

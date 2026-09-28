@@ -6,7 +6,9 @@ Three steps, and the middle one is a person:
 1. `candidates(monday)` lists what the week holds and writes a picks file,
    pre-filled with a suggestion.
 2. The picks file is edited by hand: lines deleted, reordered, a clip added.
-3. `render(monday)` turns the picks into an MP4 and a cover image.
+3. `render(monday)` turns the picks into an MP4 and a cover image, with a
+   sound layer: a whoosh under every camera flight, an ambient bed under
+   every scene, matched to its hazard.
 
     conda run -n climada_env python video.py candidates 2026-09-28
     conda run -n climada_env python video.py render 2026-09-28
@@ -36,6 +38,7 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.request
 import warnings
 from datetime import date, datetime, timedelta
 from functools import lru_cache
@@ -110,6 +113,35 @@ TINT_TOP_M = 3200.0
 TRACK_COLOURS = {-1: "#4C9C94", 0: "#2A8A81", 1: "#1B7F79", 2: "#136E68",
                  3: "#0D5C57", 4: "#084944", 5: "#043633",
                  None: "#7F8C8A"}       # position known, wind not published yet
+
+# Sound. Every file is under the Mixkit Sound Effects Free License
+# (https://mixkit.co/license/#sfxFree — commercial use, social media video
+# posts, no attribution required) and long enough to cover its longest scene
+# without looping, so mixing is trim-and-fade, never loop-and-splice. Fetched
+# once and cached like the IBTrACS file; never committed, since that licence
+# forbids redistributing an item "on its own... with source files" — a public
+# repo cloning the raw file would be exactly that.
+SOUND_SOURCES = {
+    "transition_whoosh.mp3": "https://assets.mixkit.co/active_storage/sfx/1474/1474-preview.mp3",
+    "earthquake_rumble.mp3": "https://assets.mixkit.co/active_storage/sfx/1296/1296-preview.mp3",
+    "earthquake_shock.mp3": "https://assets.mixkit.co/active_storage/sfx/1686/1686-preview.mp3",
+    "cyclone_wind.mp3": "https://assets.mixkit.co/active_storage/sfx/1200/1200-preview.mp3",
+    "wildfire_crackle.mp3": "https://assets.mixkit.co/active_storage/sfx/1329/1329-preview.mp3",
+    "flood_water.mp3": "https://assets.mixkit.co/active_storage/sfx/3126/3126-preview.mp3",
+    "volcano_rumble.mp3": "https://assets.mixkit.co/active_storage/sfx/2438/2438-preview.mp3",
+    "volcano_burst.mp3": "https://assets.mixkit.co/active_storage/sfx/2449/2449-preview.mp3",
+}
+BED_SOUND = {"TC": "cyclone_wind.mp3", "EQ": "earthquake_rumble.mp3",
+             "VO": "volcano_rumble.mp3", "FL": "flood_water.mp3",
+             "WF": "wildfire_crackle.mp3"}
+# Gains are set by ear, not by a loudness standard: most LinkedIn video plays
+# muted, so this is an enhancement for the minority who unmute, and a manual
+# mix plus a limiter is enough. Revisit only if it actually sounds wrong.
+BED_GAIN = {"TC": 0.32, "EQ": 0.26, "VO": 0.30, "FL": 0.30, "WF": 0.38}
+BED_FADE = 0.6
+ACCENT_GAIN = {"earthquake_shock.mp3": 0.55, "volcano_burst.mp3": 0.6}
+TRANSITION_GAIN, TRANSITION_FADE = 0.5, 0.12
+SOUND_DIR = report.CACHE / "sounds"
 
 VIDEO_DIR = report.OUTPUT / "digests" / "video"
 VIDEO_CACHE = report.CACHE / "video"
@@ -2218,18 +2250,25 @@ def build(monday, picks_path=None) -> dict:
 
 
 class Encoder:
-    """Raw frames piped into ffmpeg: H.264, yuv420p, a silent audio track."""
+    """Raw frames piped into ffmpeg: H.264, yuv420p, plus an audio track.
 
-    def __init__(self, path: Path):
+    `audio_path` is a pre-mixed track from `build_audio`, already the right
+    length; without one (or without ffmpeg cues at all) the track is silence,
+    kept only so LinkedIn's player shows normal playback controls.
+    """
+
+    def __init__(self, path: Path, audio_path: Path | None = None):
         ffmpeg = shutil.which("ffmpeg")
         if not ffmpeg:
             raise RuntimeError("ffmpeg not found; run through `conda run -n climada_env`")
         path.parent.mkdir(parents=True, exist_ok=True)
+        audio_input = (["-i", str(audio_path)] if audio_path else
+                      ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"])
         self.process = subprocess.Popen(
             [ffmpeg, "-y", "-v", "error",
              "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
              "-r", str(FPS), "-i", "-",
-             "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+             *audio_input,
              "-map", "0:v", "-map", "1:a", "-shortest",
              "-c:v", "libx264", "-preset", "medium", "-crf", "18",
              "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k",
@@ -2249,6 +2288,91 @@ class Encoder:
         self.process.stdin.close()
         if self.process.wait() != 0:
             raise RuntimeError("ffmpeg failed while encoding the video")
+
+
+def sound_file(name: str) -> Path:
+    """A cached local copy of one of `SOUND_SOURCES`, downloading it once."""
+    path = SOUND_DIR / name
+    if path.exists():
+        return path
+    request = urllib.request.Request(SOUND_SOURCES[name],
+                                     headers={"User-Agent": "video"})
+    with urllib.request.urlopen(request, timeout=60) as response:
+        raw = response.read()
+    SOUND_DIR.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(raw)
+    return path
+
+
+def audio_cues(timeline: list) -> list:
+    """`(file, start second, trim seconds or None, gain)` for every sound.
+
+    A trimmed cue is a bed under a scene, faded in and out at its edges so the
+    hard trim point never clicks. An untrimmed one is a short one-shot
+    (a whoosh, a shock, an eruption burst) played to its own natural end,
+    which every source here already does cleanly.
+    """
+    cues, t = [], 0.0
+    for item in timeline:
+        if isinstance(item, Flight):
+            trim = max(0.6, min(item.duration - 0.1, 2.6))
+            cues.append(("transition_whoosh.mp3", t, trim, TRANSITION_GAIN))
+        elif isinstance(item, TrackScene):
+            cues.append(("cyclone_wind.mp3", t, item.duration, BED_GAIN["TC"]))
+        elif isinstance(item, PointScene):
+            bed = BED_SOUND.get(item.kind)
+            if bed:
+                cues.append((bed, t, item.duration, BED_GAIN[item.kind]))
+            if item.kind == "EQ":
+                shock = item.SHOCK_START
+                while shock < item.duration:
+                    cues.append(("earthquake_shock.mp3", t + shock, None,
+                                ACCENT_GAIN["earthquake_shock.mp3"]))
+                    shock += item.SHOCK_PERIOD
+            elif item.kind == "VO":
+                cues.append(("volcano_burst.mp3", t + 0.25, None,
+                            ACCENT_GAIN["volcano_burst.mp3"]))
+        t += item.duration
+    return cues
+
+
+def build_audio(timeline: list, total_duration: float, path: Path):
+    """Every cue mixed into one track, `total_duration` long, at `path`.
+
+    Each input is resampled to the same format first: `adelay` (positioning
+    in time) takes a channel count it must match, and the source clips are
+    not all the same. A silent bed the length of the whole video is mixed in
+    too, so the result is always exactly `total_duration` even where nothing
+    plays. `alimiter` is the only thing standing between overlapping cues and
+    clipping — there is no full loudness pass (see `BED_GAIN`'s note).
+    """
+    ffmpeg = shutil.which("ffmpeg")
+    cues = audio_cues(timeline)
+    # `-t` on the input, not `anullsrc`'s own `d` option: this ffmpeg build
+    # (4.3.1) does not have it.
+    inputs, chains, labels = ["-f", "lavfi", "-t", f"{total_duration:.3f}", "-i",
+                              "anullsrc=channel_layout=stereo:sample_rate=44100"], [], ["0:a"]
+    for i, (name, start, trim, gain) in enumerate(cues, start=1):
+        inputs += ["-i", str(sound_file(name))]
+        steps = ["aformat=sample_rates=44100:channel_layouts=stereo"]
+        if trim is not None:
+            fade = min(BED_FADE, trim / 2)
+            steps += [f"atrim=0:{trim:.3f}",
+                     f"afade=t=in:st=0:d={fade:.3f}",
+                     f"afade=t=out:st={trim - fade:.3f}:d={fade:.3f}"]
+        else:
+            steps.append("afade=t=in:st=0:d=0.01")
+        steps += [f"volume={gain}", f"adelay={round(start * 1000)}|{round(start * 1000)}"]
+        chains.append(f"[{i}:a]{','.join(steps)}[a{i}]")
+        labels.append(f"a{i}")
+    mix = "".join(f"[{label}]" for label in labels)
+    filter_complex = ";".join(chains + [
+        f"{mix}amix=inputs={len(labels)}:duration=first:dropout_transition=0,"
+        f"alimiter=limit=0.9[mix]"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run([ffmpeg, "-y", "-v", "error", *inputs,
+                   "-filter_complex", filter_complex, "-map", "[mix]",
+                   "-t", f"{total_duration:.3f}", str(path)], check=True)
 
 
 def render(monday, picks_path=None) -> dict:
@@ -2271,7 +2395,11 @@ def render(monday, picks_path=None) -> dict:
     Image.fromarray((np.clip(cover, 0, 1) * 255 + 0.5).astype(np.uint8)).save(paths["cover"])
     timeline.append(EndCard(plan["start"], plan["end"], plan["credits"], cover))
 
-    encoder = Encoder(paths["video"])
+    total_duration = sum(item.duration for item in timeline)
+    audio_path = paths["video"].with_suffix(".wav")
+    build_audio(timeline, total_duration, audio_path)
+
+    encoder = Encoder(paths["video"], audio_path)
     try:
         # Map, then the chrome, then the card: the card's text belongs on top
         # of the fixed paper band.
@@ -2287,6 +2415,7 @@ def render(monday, picks_path=None) -> dict:
                 encoder.write(frame)
     finally:
         encoder.close()
+    audio_path.unlink(missing_ok=True)
 
     seconds = encoder.count / FPS
     print(f"{paths['video']}  {seconds:.1f} s, {encoder.count} frames, "
