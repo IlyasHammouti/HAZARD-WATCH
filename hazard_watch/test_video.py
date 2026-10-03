@@ -137,6 +137,26 @@ def test_drought_region_drops_the_year_slug():
     assert video._drought_region({"event_name": ""}) == ""
 
 
+def test_drought_is_drawn_from_its_polygon_not_its_countries():
+    """Russia in the country list must not paint Russia to the Pacific."""
+    cell = {"type": "Polygon",
+            "coordinates": [[[33, 53], [34, 53], [34, 54], [33, 54], [33, 53]]]}
+    event = {"event_type": "DR", "event_id": 5, "episode_id": 1,
+             "countries_iso3": ["RUS"]}
+    original = natcat.gdacs_geometry
+    try:
+        natcat.gdacs_geometry = lambda e: [{"geometry": cell}]
+        assert tuple(video.drought_area(event).total_bounds) == (33, 53, 34, 54)
+        natcat.gdacs_geometry = lambda e: []
+        try:
+            video.drought_area(event)
+            assert False, "an alert without its polygon must stop the render"
+        except RuntimeError:
+            pass
+    finally:
+        natcat.gdacs_geometry = original
+
+
 def test_saffir_simpson_thresholds():
     assert natcat.saffir_simpson(None) is None
     assert natcat.saffir_simpson(30) == -1

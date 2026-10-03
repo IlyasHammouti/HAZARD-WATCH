@@ -544,6 +544,26 @@ def read_picks(path) -> tuple:
     return scenes, droughts
 
 
+def drought_area(event: dict):
+    """A drought alert's own footprint, as a GeoDataFrame in lon/lat.
+
+    This is GDACS's affected-area polygon, which it takes from the Global
+    Drought Observatory's RDrI-Agri grid: one-degree cells, the resolution the
+    alert itself is decided at. The alert's country list is far coarser.
+    "Europe-2026" names Russia for a few cells on its western border, and
+    filling the listed countries painted the alert to the Pacific.
+    """
+    import geopandas
+    from shapely.geometry import shape
+
+    shapes = [shape(f["geometry"]) for f in natcat.gdacs_geometry(event)]
+    if not shapes:
+        # Failing beats falling back to whole countries, which is the wrong map.
+        raise RuntimeError(f"No GDACS polygon for drought {key_of(event)}; "
+                           f"the geometry service may be down, render again later")
+    return geopandas.GeoDataFrame(geometry=shapes, crs="EPSG:4326")
+
+
 def _load_event(record: dict) -> dict:
     event = dict(record)
     for field in ("from_date", "to_date"):
@@ -1951,17 +1971,13 @@ class WorldScene(Scene):
                               ("The week's GDACS alerts, one by one", 26)], INK)
 
     def _drought(self, event: dict, index: int, view: View) -> dict:
-        countries = natural_earth("admin_0_countries", "50m")
-        wanted = set(event.get("countries_iso3") or [])
-        rows = countries[countries["ADM0_A3"].isin(wanted)
-                         | countries["ISO_A3"].isin(wanted)]
-        pieces = [g for _, g in clipped(rows, view, pad=0.0)]
+        pieces = [g for _, g in clipped(drought_area(event), view, pad=0.0)]
         colour = carto.PERIL_COLOURS["drought"]
         fill = overlay(view, lambda ax: _fill(ax, pieces, facecolor=colour,
                                               alpha=0.5, edgecolor="none"))
         edge = overlay(view, lambda ax: _draw_lines(ax, pieces, colors=colour,
                                                     linewidths=1.6))
-        # The label goes on the countries themselves. The GDACS point for a
+        # The label goes on the area itself. The GDACS point for a
         # drought is the centroid of its polygon, which for "Europe" sits in
         # Bavaria and for a coastal alert can sit at sea.
         import shapely
