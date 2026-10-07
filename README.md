@@ -16,6 +16,7 @@ produced it, then revises it in public as better data arrives.
 
 The output is published on LinkedIn under the name Hazard Watch. This
 repository is the method behind those posts.
+https://www.linkedin.com/company/hazard-watch/
 
 > **All figures produced here are modelled estimates. They are not loss
 > adjustments, official assessments, or professional insurance advice.**
